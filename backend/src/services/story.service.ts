@@ -44,15 +44,19 @@ export async function generateStory(opts: {
 
 1. A narration script of AT MOST ${narrationWords} words, paced to finish within \
 ${targetSeconds} seconds of natural speech — it must not run over. It should tell an \
-engaging, coherent story drawn from the source text — like a documentary narrator.
+engaging, coherent story drawn from the source text — like an objective, realistic documentary narrator. \
+Importantly, do NOT genericize or simplify: retain key names of people, organizations, places, key dates, \
+specific statistics, and critical technical details from the source text to ensure the script feels \
+realistic, objective, and grounded in the source facts.
 
 2. Exactly ${segmentCount} scene descriptions for 8-second video segments that flow as \
 one continuous story. Each scene should visually illustrate part of the narration with \
 cinematic motion. Describe camera movements, subjects, and visual style. The scenes must \
 be purely visual with ambient sound only: no dialogue, speech, singing, or quoted text, \
 and no on-screen text or labels. Keep imagery symbolic and family-friendly — avoid \
-violence, weapons, suffering, and identifiable real or historical people (use anonymous, \
-stylized figures instead) so the scenes pass video safety filters.${imageNote}
+violence, weapons, suffering. While avoiding identifiable real or historical people in the prompts to pass \
+video safety filters, describe stylized representations or visually abstract depictions of the events/concepts \
+mentioned in the narration.${imageNote}
 
 Source text:
 ${storyText.slice(0, 6000)}
