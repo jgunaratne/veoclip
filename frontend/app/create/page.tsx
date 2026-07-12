@@ -13,6 +13,7 @@ import styles from "./page.module.css";
 type ClipStatus =
   | "idle"
   | "uploading"
+  | "preparing_script"
   | "generating_video"
   | "generating_audio"
   | "muxing"
@@ -23,17 +24,19 @@ interface Clip {
   id: string;
   status: ClipStatus;
   error?: string;
+  narrationScript?: string;
+  currentSegment?: number;
+  totalSegments?: number;
   finalPath?: string;
   videoPath?: string;
 }
 
 export default function CreatePage() {
   // Form state
-  const [file, setFile] = useState<File | null>(null);
-  const [videoPrompt, setVideoPrompt] = useState("");
-  const [voiceoverScript, setVoiceoverScript] = useState("");
-  const [voice, setVoice] = useState("en-US-Journey-D");
-  const [duration, setDuration] = useState(5);
+  const [files, setFiles] = useState<File[]>([]);
+  const [storyText, setStoryText] = useState("");
+  const [voice, setVoice] = useState("Puck");
+  const [length, setLength] = useState(30);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -48,18 +51,40 @@ export default function CreatePage() {
     };
   }, []);
 
+  // Polling fallback if SSE doesn't work
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startPolling = useCallback((clipId: string) => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/clips/${clipId}`);
+        if (!res.ok) return;
+        const updated: Clip = await res.json();
+        setClip(updated);
+        if (updated.status === "complete" || updated.status === "error") {
+          clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+        }
+      } catch {
+        // Ignore fetch errors during polling
+      }
+    }, 3000);
+  }, []);
+
   const handleGenerate = useCallback(async () => {
-    if (!file || !videoPrompt.trim()) return;
+    if (!storyText.trim()) return;
     setIsSubmitting(true);
 
     try {
       // 1. Create clip via multipart POST
       const formData = new FormData();
-      formData.append("image", file);
-      formData.append("videoPrompt", videoPrompt);
-      formData.append("voiceoverScript", voiceoverScript);
+      for (const file of files) {
+        formData.append("images", file);
+      }
+      formData.append("storyText", storyText);
       formData.append("speakerVoice", voice);
-      formData.append("duration", String(duration));
+      formData.append("length", String(length));
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -73,7 +98,7 @@ export default function CreatePage() {
 
       const newClip: Clip = await createRes.json();
       // Show generating status immediately
-      setClip({ ...newClip, status: "generating_video" });
+      setClip({ ...newClip, status: "preparing_script" });
 
       // 2. Start generation
       const genRes = await fetch(`/api/clips/${newClip.id}/generate`, {
@@ -124,28 +149,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [file, videoPrompt, voiceoverScript, voice, duration]);
-
-  // Polling fallback if SSE doesn't work
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const startPolling = useCallback((clipId: string) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/clips/${clipId}`);
-        if (!res.ok) return;
-        const updated: Clip = await res.json();
-        setClip(updated);
-        if (updated.status === "complete" || updated.status === "error") {
-          clearInterval(pollingRef.current!);
-          pollingRef.current = null;
-        }
-      } catch {
-        // Ignore fetch errors during polling
-      }
-    }, 3000);
-  }, []);
+  }, [files, storyText, voice, length, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
@@ -158,7 +162,7 @@ export default function CreatePage() {
     clip.status !== "idle" &&
     clip.status !== "complete" &&
     clip.status !== "error";
-  const canGenerate = file && videoPrompt.trim() && !isSubmitting && !isGenerating;
+  const canGenerate = storyText.trim() && !isSubmitting && !isGenerating;
 
   // Determine final video URL
   const finalVideoUrl = clip?.finalPath
@@ -172,40 +176,32 @@ export default function CreatePage() {
       <Navbar />
       <main className={styles.main}>
         <div className={styles.header}>
-          <h1 className={styles.title}>Create a Clip</h1>
+          <h1 className={styles.title}>Create a Story Video</h1>
           <p className={styles.subtitle}>
-            Upload an image, describe the motion, and add a voiceover
+            Paste your text, add images, and get a narrated vertical video
+            ready for social media
           </p>
         </div>
 
         <div className={styles.grid}>
-          {/* Left column — Image */}
+          {/* Left column — Images */}
           <div className={styles.left}>
-            <ImageUpload file={file} onFileChange={setFile} />
+            <ImageUpload files={files} onFilesChange={setFiles} />
           </div>
 
           {/* Right column — Controls */}
           <div className={styles.right}>
             <PromptInput
-              label="Video Prompt"
-              value={videoPrompt}
-              onChange={setVideoPrompt}
-              placeholder="Describe the motion you want… e.g. 'Slow zoom into the forest, birds take flight across the sky'"
-              maxLength={1000}
-              rows={4}
-            />
-
-            <PromptInput
-              label="Voiceover Script"
-              value={voiceoverScript}
-              onChange={setVoiceoverScript}
-              placeholder="Write the narration to be spoken over the video… (optional)"
-              maxLength={2000}
-              rows={3}
+              label="Story Text"
+              value={storyText}
+              onChange={setStoryText}
+              placeholder="Paste the text your story should be based on — an article, notes, a chapter… The AI writes the narration and scenes from it."
+              maxLength={6000}
+              rows={8}
             />
 
             <div className={styles.settings}>
-              <DurationPicker value={duration} onChange={setDuration} />
+              <DurationPicker value={length} onChange={setLength} />
               <VoiceSelector value={voice} onChange={setVoice} />
             </div>
 
@@ -219,7 +215,7 @@ export default function CreatePage() {
                   ? "Submitting…"
                   : isGenerating
                     ? "⏳ Generating…"
-                    : "✨ Generate Clip"}
+                    : "✨ Generate Story Video"}
               </span>
             </button>
 
@@ -245,6 +241,8 @@ export default function CreatePage() {
             <StatusTracker
               status={clip.status}
               error={clip.error}
+              currentSegment={clip.currentSegment}
+              totalSegments={clip.totalSegments}
               onRetry={handleRetry}
             />
           </section>
@@ -259,7 +257,7 @@ export default function CreatePage() {
               download={`veoclip_${clip.id}.mp4`}
               className={`btn-primary ${styles.downloadBtn}`}
             >
-              <span>⬇ Download Clip</span>
+              <span>⬇ Download Video</span>
             </a>
           </section>
         )}

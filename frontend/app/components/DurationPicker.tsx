@@ -7,17 +7,17 @@ interface DurationPickerProps {
   onChange: (value: number) => void;
 }
 
+// Story length in seconds → generated as chained 8 s Veo segments
 const OPTIONS = [
-  { value: 5, label: "5s" },
-  { value: 8, label: "8s" },
-  { value: 16, label: "16s", badge: "2×" },
-  { value: 24, label: "24s", badge: "3×" },
+  { value: 30, label: "30s", badge: "4 scenes" },
+  { value: 60, label: "1m", badge: "8 scenes" },
+  { value: 180, label: "3m", badge: "23 scenes" },
 ];
 
 export default function DurationPicker({ value, onChange }: DurationPickerProps) {
   return (
     <div className={styles.wrapper}>
-      <label className={styles.label}>Duration</label>
+      <label className={styles.label}>Story Length</label>
       <div className={styles.pills}>
         {OPTIONS.map((opt) => (
           <button

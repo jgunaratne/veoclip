@@ -3,7 +3,8 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
-import type { Clip } from '../types/clip.js';
+import type { Clip, StoryLength } from '../types/clip.js';
+import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
   getClip,
   setClip,
@@ -12,26 +13,18 @@ import {
   deleteClip,
   subscribeToClip,
 } from '../store.js';
-import { generateVideo } from '../services/veo.service.js';
-import { generateVoiceover } from '../services/tts.service.js';
-import { muxVideoAudio } from '../services/mux.service.js';
-
-// ---------------------------------------------------------------------------
-// Available TTS voices
-// ---------------------------------------------------------------------------
-
-const VOICES = [
-  { id: 'en-US-Journey-D', name: 'Journey D (Male)', gender: 'MALE' },
-  { id: 'en-US-Journey-F', name: 'Journey F (Female)', gender: 'FEMALE' },
-  { id: 'en-US-Journey-O', name: 'Journey O (Female)', gender: 'FEMALE' },
-  { id: 'en-US-Casual-K', name: 'Casual K (Male)', gender: 'MALE' },
-  { id: 'en-US-Neural2-A', name: 'Neural2 A (Male)', gender: 'MALE' },
-  { id: 'en-US-Neural2-C', name: 'Neural2 C (Female)', gender: 'FEMALE' },
-  { id: 'en-US-Neural2-D', name: 'Neural2 D (Male)', gender: 'MALE' },
-  { id: 'en-US-Neural2-F', name: 'Neural2 F (Female)', gender: 'FEMALE' },
-  { id: 'en-US-Studio-M', name: 'Studio M (Male)', gender: 'MALE' },
-  { id: 'en-US-Studio-O', name: 'Studio O (Female)', gender: 'FEMALE' },
-];
+import { generateVideo, VideoFilteredError } from '../services/veo.service.js';
+import { generateStory, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
+import {
+  generateVoiceover,
+  getAvailableVoices,
+  getDefaultVoice,
+} from '../services/tts.service.js';
+import {
+  muxVideoAudio,
+  concatenateVideos,
+  extractLastFrame,
+} from '../services/mux.service.js';
 
 // ---------------------------------------------------------------------------
 // Multer setup
@@ -39,6 +32,8 @@ const VOICES = [
 
 const uploadDir = process.env.UPLOAD_DIR || './uploads';
 const outputDir = process.env.OUTPUT_DIR || './output';
+
+const MAX_IMAGES = 8;
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
@@ -50,7 +45,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per image
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -71,9 +66,9 @@ apiRouter.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// List available voices
+// List available voices (depends on the configured auth mode)
 apiRouter.get('/voices', (_req: Request, res: Response) => {
-  res.json(VOICES);
+  res.json(getAvailableVoices());
 });
 
 // List all clips
@@ -91,21 +86,23 @@ apiRouter.get('/clips/:id', (req: Request, res: Response) => {
   res.json(clip);
 });
 
-// Create a new clip (multipart: image file + text fields)
+// Create a new clip (multipart: image files + text fields)
 apiRouter.post(
   '/clips',
-  upload.single('image'),
+  upload.array('images', MAX_IMAGES),
   (req: Request, res: Response) => {
-    const file = req.file;
-    if (!file) {
-      res.status(400).json({ error: 'Image file is required' });
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+
+    const { storyText, speakerVoice, length } = req.body;
+
+    if (!storyText || !storyText.trim()) {
+      res.status(400).json({ error: 'storyText is required' });
       return;
     }
 
-    const { videoPrompt, voiceoverScript, speakerVoice, duration } = req.body;
-
-    if (!videoPrompt) {
-      res.status(400).json({ error: 'videoPrompt is required' });
+    const parsedLength = Number(length) as StoryLength;
+    if (!SEGMENT_COUNTS[parsedLength]) {
+      res.status(400).json({ error: 'length must be 30, 60 or 180' });
       return;
     }
 
@@ -113,11 +110,10 @@ apiRouter.post(
       id: uuidv4(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      referenceImagePath: file.path,
-      videoPrompt,
-      voiceoverScript: voiceoverScript || '',
-      speakerVoice: speakerVoice || 'en-US-Journey-D',
-      duration: Number(duration) || 5,
+      storyText,
+      referenceImagePaths: files.map((f) => f.path),
+      speakerVoice: speakerVoice || getDefaultVoice(),
+      length: parsedLength,
       status: 'idle',
     };
 
@@ -180,7 +176,7 @@ apiRouter.delete('/clips/:id', async (req: Request, res: Response) => {
 
   // Clean up files
   const filePaths = [
-    clip.referenceImagePath,
+    ...clip.referenceImagePaths,
     clip.videoPath,
     clip.audioPath,
     clip.finalPath,
@@ -198,66 +194,125 @@ apiRouter.delete('/clips/:id', async (req: Request, res: Response) => {
   res.status(204).send();
 });
 
-import { concatenateVideos, extractLastFrame } from '../services/mux.service.js';
-
 // ---------------------------------------------------------------------------
 // Async generation pipeline
 // ---------------------------------------------------------------------------
 
+/**
+ * Spread the user's reference images across the story's segments so each
+ * image anchors a stretch of the video. Segment 0 always gets the first
+ * image; segments without an assigned image chain from the previous
+ * segment's last frame.
+ */
+function assignSeedImages(
+  imagePaths: string[],
+  segmentCount: number,
+): Map<number, string> {
+  const seeds = new Map<number, string>();
+  if (imagePaths.length === 0) return seeds;
+
+  const usable = imagePaths.slice(0, segmentCount);
+  for (let j = 0; j < usable.length; j++) {
+    const segmentIndex = Math.round((j * segmentCount) / usable.length);
+    seeds.set(Math.min(segmentIndex, segmentCount - 1), usable[j]);
+  }
+  return seeds;
+}
+
 async function runPipeline(clipId: string): Promise<void> {
   try {
     const clip = getClip(clipId)!;
-
-    // Determine how many segments we need (max 8s per Veo call)
-    const segmentDuration = 8;
-    const totalDuration = clip.duration;
-    const segmentCount = Math.ceil(totalDuration / segmentDuration);
+    const segmentCount = SEGMENT_COUNTS[clip.length];
 
     console.log(
-      `[pipeline] Starting generation for clip ${clipId}: ${totalDuration}s = ${segmentCount} segment(s)`,
+      `[pipeline] Starting story generation for clip ${clipId}: ` +
+        `${clip.length}s target = ${segmentCount} segment(s), ` +
+        `${clip.referenceImagePaths.length} reference image(s)`,
     );
-    updateClip(clipId, { status: 'generating_video' });
+
+    // ── Step 1: Write the story (narration + scene prompts) ──────────
+    updateClip(clipId, { status: 'preparing_script', totalSegments: segmentCount });
+
+    const story = await generateStory({
+      storyText: clip.storyText,
+      imagePaths: clip.referenceImagePaths,
+      targetSeconds: clip.length,
+      segmentCount,
+    });
+
+    updateClip(clipId, {
+      narrationScript: story.narrationScript,
+      scenePrompts: story.scenes.map((s) => s.prompt),
+      status: 'generating_video',
+    });
+
+    // ── Step 2: Generate Veo segments with frame chaining ────────────
+    const seedAssignments = assignSeedImages(
+      clip.referenceImagePaths,
+      segmentCount,
+    );
 
     const segmentPaths: string[] = [];
-    let seedImagePath = clip.referenceImagePath;
+    let chainedSeedPath: string | null = null;
 
-    for (let seg = 0; seg < segmentCount; seg++) {
-      const isLastSegment = seg === segmentCount - 1;
-      // Last segment may be shorter
-      const dur = isLastSegment
-        ? totalDuration - seg * segmentDuration
-        : segmentDuration;
-
+    for (let seg = 0; seg < Math.min(story.scenes.length, segmentCount); seg++) {
+      updateClip(clipId, { currentSegment: seg + 1 });
       console.log(
-        `[pipeline] Generating segment ${seg + 1}/${segmentCount} (${dur}s) for clip ${clipId}`,
+        `[pipeline] Generating segment ${seg + 1}/${segmentCount} for clip ${clipId}`,
       );
 
-      const segVideoPath = await generateVideo({
-        imagePath: seedImagePath,
-        prompt: clip.videoPrompt,
-        duration: dur >= 5 ? dur : 5, // Veo minimum is 5s
-        outputDir,
-        clipId: `${clipId}_seg${seg}`,
-        onStatusChange: () => {},
-      });
+      // A user image assigned to this slot wins over the chained frame
+      const seedImagePath = seedAssignments.get(seg) ?? chainedSeedPath;
+
+      const scenePrompt = story.scenes[seg].prompt;
+      let segVideoPath: string;
+      try {
+        segVideoPath = await generateVideo({
+          imagePath: seedImagePath,
+          prompt: scenePrompt,
+          duration: SEGMENT_DURATION,
+          outputDir,
+          clipId: `${clipId}_seg${seg}`,
+        });
+      } catch (err) {
+        if (!(err instanceof VideoFilteredError)) throw err;
+        // Don't let one filtered scene sink the whole run —
+        // retry once with a deliberately safe abstract prompt.
+        console.log(
+          `[pipeline] Segment ${seg + 1} filtered (${err.message}); retrying with sanitized prompt`,
+        );
+        segVideoPath = await generateVideo({
+          imagePath: seedImagePath,
+          prompt: SAFE_FALLBACK_SCENE,
+          duration: SEGMENT_DURATION,
+          outputDir,
+          clipId: `${clipId}_seg${seg}`,
+        });
+      }
 
       segmentPaths.push(segVideoPath);
 
       // Extract last frame for chaining (unless this is the last segment)
-      if (!isLastSegment) {
-        seedImagePath = await extractLastFrame({
-          videoPath: segVideoPath,
-          outputDir,
-          clipId,
-          segmentIndex: seg,
-        });
+      if (seg < segmentCount - 1) {
+        try {
+          chainedSeedPath = await extractLastFrame({
+            videoPath: segVideoPath,
+            outputDir,
+            clipId,
+            segmentIndex: seg,
+          });
+        } catch {
+          console.warn(
+            `[pipeline] Couldn't extract last frame of segment ${seg + 1}; next segment won't be chained`,
+          );
+          chainedSeedPath = null;
+        }
       }
     }
 
     // Concatenate segments if we have more than one
     let videoPath: string;
     if (segmentPaths.length > 1) {
-      updateClip(clipId, { status: 'muxing' }); // reuse muxing status for concat
       videoPath = await concatenateVideos({
         videoPaths: segmentPaths,
         outputDir,
@@ -267,38 +322,33 @@ async function runPipeline(clipId: string): Promise<void> {
       videoPath = segmentPaths[0];
     }
 
-    updateClip(clipId, { videoPath, status: 'generating_audio' });
-    console.log(`[pipeline] Video done, generating audio for clip ${clipId}`);
+    updateClip(clipId, {
+      videoPath,
+      status: 'generating_audio',
+      currentSegment: undefined,
+    });
+    console.log(`[pipeline] Video done, generating narration audio for clip ${clipId}`);
 
-    // Generate voiceover with TTS
-    let audioPath: string | undefined;
-    if (clip.voiceoverScript && clip.voiceoverScript.trim().length > 0) {
-      audioPath = await generateVoiceover({
-        script: clip.voiceoverScript,
-        voice: clip.speakerVoice,
-        outputDir,
-        clipId,
-      });
-    }
+    // ── Step 3: Narration voiceover ───────────────────────────────────
+    const audioPath = await generateVoiceover({
+      script: story.narrationScript,
+      voice: clip.speakerVoice,
+      outputDir,
+      clipId,
+    });
 
-    // Mux video + audio (if audio exists)
-    if (audioPath) {
-      updateClip(clipId, { audioPath, status: 'muxing' });
-      console.log(`[pipeline] Audio done, muxing for clip ${clipId}`);
+    // ── Step 4: Mux video + narration ─────────────────────────────────
+    updateClip(clipId, { audioPath, status: 'muxing' });
+    console.log(`[pipeline] Audio done, muxing for clip ${clipId}`);
 
-      const finalPath = await muxVideoAudio({
-        videoPath,
-        audioPath,
-        outputDir,
-        clipId,
-      });
+    const finalPath = await muxVideoAudio({
+      videoPath,
+      audioPath,
+      outputDir,
+      clipId,
+    });
 
-      updateClip(clipId, { finalPath, status: 'complete' });
-    } else {
-      // No voiceover — the raw video IS the final video
-      updateClip(clipId, { finalPath: videoPath, status: 'complete' });
-    }
-
+    updateClip(clipId, { finalPath, status: 'complete' });
     console.log(`[pipeline] Clip ${clipId} complete!`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
