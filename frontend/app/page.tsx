@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import Navbar from "./components/Navbar";
 import ImageUpload from "./components/ImageUpload";
 import PromptInput from "./components/PromptInput";
@@ -39,6 +40,7 @@ export default function CreatePage() {
   const [storyText, setStoryText] = useState("");
   const [voice, setVoice] = useState("Puck");
   const [length, setLength] = useState(30);
+  const [ensureContinuity, setEnsureContinuity] = useState(false);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -87,6 +89,7 @@ export default function CreatePage() {
       formData.append("storyText", storyText);
       formData.append("speakerVoice", voice);
       formData.append("length", String(length));
+      formData.append("ensureContinuity", String(ensureContinuity));
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -206,6 +209,13 @@ export default function CreatePage() {
               <DurationPicker value={length} onChange={setLength} />
               <VoiceSelector value={voice} onChange={setVoice} />
             </div>
+
+            <CheckboxInput
+              label="Ensure visual continuity between scenes"
+              description="Tightly links visual flow between scenes (generates sequentially, takes 10-20 minutes). If disabled, scenes generate in parallel (takes ~2 minutes)."
+              value={ensureContinuity}
+              onChange={(checked) => setEnsureContinuity(checked)}
+            />
 
             <Button
               variant="primary"
