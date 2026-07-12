@@ -44,10 +44,11 @@ export async function generateStory(opts: {
 
 1. A narration script of AT MOST ${narrationWords} words, paced to finish within \
 ${targetSeconds} seconds of natural speech — it must not run over. It should tell an \
-engaging, coherent story drawn from the source text — like an objective, realistic documentary narrator. \
-Importantly, do NOT genericize or simplify: retain key names of people, organizations, places, key dates, \
-specific statistics, and critical technical details from the source text to ensure the script feels \
-realistic, objective, and grounded in the source facts.
+informative, objective, and realistic story drawn from the source text, mimicking the style of a serious \
+journalistic, educational, or historical documentary (e.g., PBS Frontline or BBC Horizon).
+- Do NOT use generic intro/outro phrases, promotional hooks, or cinematic cliches (e.g., "Join us...", "In this video...", "Discover the secrets of...", "Let's explore...").
+- Every single sentence must convey concrete information, key facts, specific dates, names of real people, places, or organizations, and actual statistics/numbers from the source text.
+- Prioritize accuracy, objectivity, and informativeness over dramatic narrative or creative embellishment. Avoid vague summaries or simplifying details.
 
 2. Exactly ${segmentCount} scene descriptions for 8-second video segments that flow as \
 one continuous story. Each scene should visually illustrate part of the narration with \
