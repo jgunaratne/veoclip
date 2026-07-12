@@ -55,6 +55,84 @@
   color: var(--text-muted);
 }
 
+/* Thumbnail grid (multi-image) */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  align-self: flex-start;
+}
+.thumbWrap {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.thumbIndex {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.thumbRemove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(244, 63, 94, 0.85);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+}
+.thumbWrap:hover .thumbRemove {
+  opacity: 1;
+}
+.addTile {
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-sm);
+  border: 2px dashed var(--border-medium);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  transition: all var(--transition-normal);
+}
+.addTile:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-tertiary);
+}
+.addIcon {
+  font-size: 1.4rem;
+}
+
 /* Preview */
 .previewWrap {
   position: relative;

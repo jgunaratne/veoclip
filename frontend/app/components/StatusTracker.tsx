@@ -5,6 +5,7 @@ import styles from "./StatusTracker.module.css";
 type ClipStatus =
   | "idle"
   | "uploading"
+  | "preparing_script"
   | "generating_video"
   | "generating_audio"
   | "muxing"
@@ -14,13 +15,15 @@ type ClipStatus =
 interface StatusTrackerProps {
   status: ClipStatus;
   error?: string;
+  currentSegment?: number;
+  totalSegments?: number;
   onRetry?: () => void;
 }
 
 const STEPS: { key: ClipStatus; label: string }[] = [
-  { key: "uploading", label: "Uploading" },
-  { key: "generating_video", label: "Generating Video" },
-  { key: "generating_audio", label: "Generating Audio" },
+  { key: "preparing_script", label: "Writing Story" },
+  { key: "generating_video", label: "Generating Scenes" },
+  { key: "generating_audio", label: "Recording Narration" },
   { key: "muxing", label: "Combining" },
   { key: "complete", label: "Complete" },
 ];
@@ -43,6 +46,8 @@ function stepState(
 export default function StatusTracker({
   status,
   error,
+  currentSegment,
+  totalSegments,
   onRetry,
 }: StatusTrackerProps) {
   if (status === "idle") return null;
@@ -75,9 +80,15 @@ export default function StatusTracker({
                     {state === "done" ? "✓" : i + 1}
                   </div>
                   <span className={styles.stepLabel}>{step.label}</span>
-                  {state === "active" && step.key === "generating_video" && (
-                    <span className={styles.estimate}>~2-5 min</span>
-                  )}
+                  {state === "active" &&
+                    step.key === "generating_video" &&
+                    (currentSegment && totalSegments ? (
+                      <span className={styles.estimate}>
+                        Scene {currentSegment} of {totalSegments} · ~1-4 min each
+                      </span>
+                    ) : (
+                      <span className={styles.estimate}>~1-4 min per scene</span>
+                    ))}
                 </div>
               </div>
             );

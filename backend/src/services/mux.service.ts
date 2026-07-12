@@ -1,21 +1,68 @@
-import ffmpeg from 'fluent-ffmpeg';
+import ffmpeg from './ffmpeg.js';
 import path from 'path';
 import fs from 'fs/promises';
 
 /**
- * Merge a raw video (no audio) with a voiceover MP3 into a final MP4.
+ * Get the duration of a media file in seconds via ffprobe.
  */
-export function muxVideoAudio(opts: {
+function getMediaDuration(mediaPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(mediaPath, (err, metadata) => {
+      if (err) {
+        reject(new Error(`ffprobe failed for ${mediaPath}: ${err.message}`));
+        return;
+      }
+      resolve(metadata.format.duration ?? 0);
+    });
+  });
+}
+
+/**
+ * Build an atempo filter for the given speed-up ratio. A single atempo is
+ * limited to [0.5, 2.0], so larger ratios are chained.
+ */
+function atempoChain(ratio: number): string {
+  const stages: string[] = [];
+  let remaining = ratio;
+  while (remaining > 2.0) {
+    stages.push('atempo=2.0');
+    remaining /= 2.0;
+  }
+  stages.push(`atempo=${remaining.toFixed(4)}`);
+  return stages.join(',');
+}
+
+/**
+ * Merge a raw video (no audio) with a voiceover into a final MP4.
+ *
+ * If the narration runs past the video, the audio is time-scaled to fit
+ * instead of being chopped off mid-sentence.
+ */
+export async function muxVideoAudio(opts: {
   videoPath: string;
   audioPath: string;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const { videoPath, audioPath, outputDir, clipId } = opts;
-    const outputPath = path.join(outputDir, `${clipId}_final.mp4`);
+  const { videoPath, audioPath, outputDir, clipId } = opts;
+  const outputPath = path.join(outputDir, `${clipId}_final.mp4`);
 
-    ffmpeg()
+  const [videoDuration, audioDuration] = await Promise.all([
+    getMediaDuration(videoPath),
+    getMediaDuration(audioPath),
+  ]);
+
+  const audioFilters: string[] = [];
+  if (audioDuration > videoDuration && videoDuration > 0) {
+    const ratio = audioDuration / videoDuration;
+    audioFilters.push(atempoChain(ratio));
+    console.log(
+      `[ffmpeg] Narration overran video by ${((ratio - 1) * 100).toFixed(1)}%; time-scaling to fit`,
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg()
       .input(videoPath)
       .input(audioPath)
       .outputOptions([
@@ -24,7 +71,13 @@ export function muxVideoAudio(opts: {
         '-map 0:v:0',
         '-map 1:a:0',
         '-shortest',
-      ])
+      ]);
+
+    if (audioFilters.length > 0) {
+      command.audioFilters(audioFilters);
+    }
+
+    command
       .output(outputPath)
       .on('start', (cmd) => console.log(`[ffmpeg] ${cmd}`))
       .on('end', () => {

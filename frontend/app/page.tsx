@@ -6,11 +6,12 @@ export default function Home() {
     <div className={styles.hero}>
       <div className={styles.heroContent}>
         <h1 className={styles.heroTitle}>
-          Turn Still Images Into Living Stories
+          Turn Your Text and Photos Into Story Videos
         </h1>
         <p className={styles.heroSub}>
-          Upload a photo, describe the motion you envision, add a voiceover
-          script, and let AI bring it all to life as a cinematic video clip.
+          Paste any text, add a few images, pick a length — AI writes the
+          story, narrates it, and renders a vertical video ready for social
+          media.
         </p>
         <Link href="/create" className={`btn-primary ${styles.heroCta}`}>
           <span>✨ Start Creating</span>
@@ -23,8 +24,8 @@ export default function Home() {
               <span className={styles.stepNumber}>1</span>Upload
             </h3>
             <p className={styles.featureDesc}>
-              Drop in any still image — a photo, illustration, or AI-generated
-              artwork — as the seed for your video.
+              Paste the text your story is based on and drop in images — they
+              anchor scenes throughout your video.
             </p>
           </div>
           <div className={`glass ${styles.featureCard}`}>
@@ -33,8 +34,8 @@ export default function Home() {
               <span className={styles.stepNumber}>2</span>Generate
             </h3>
             <p className={styles.featureDesc}>
-              Describe the motion you want and write a voiceover script. Veo and
-              Cloud TTS handle the rest.
+              Pick 30 seconds, 1 minute, or 3 minutes. Gemini writes the
+              narration and scenes; Veo films them.
             </p>
           </div>
           <div className={`glass ${styles.featureCard}`}>
@@ -43,8 +44,8 @@ export default function Home() {
               <span className={styles.stepNumber}>3</span>Download
             </h3>
             <p className={styles.featureDesc}>
-              Preview your clip in-browser and download the final MP4 with
-              synced narration.
+              Preview in-browser and download a vertical MP4 with synced
+              narration, ready to post.
             </p>
           </div>
         </div>

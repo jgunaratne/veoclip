@@ -1,95 +1,124 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import styles from "./ImageUpload.module.css";
 
+const MAX_IMAGES = 8;
+
 interface ImageUploadProps {
-  file: File | null;
-  onFileChange: (file: File | null) => void;
+  files: File[];
+  onFilesChange: (files: File[]) => void;
 }
 
-export default function ImageUpload({ file, onFileChange }: ImageUploadProps) {
+export default function ImageUpload({ files, onFilesChange }: ImageUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
 
-  const handleFile = useCallback(
-    (f: File) => {
-      onFileChange(f);
-      const url = URL.createObjectURL(f);
-      setPreview(url);
+  // Object URLs derived from the file list; revoked when the list changes
+  const previews = useMemo(
+    () => files.map((f) => URL.createObjectURL(f)),
+    [files],
+  );
+  useEffect(() => {
+    return () => previews.forEach((u) => URL.revokeObjectURL(u));
+  }, [previews]);
+
+  const addFiles = useCallback(
+    (incoming: FileList | File[]) => {
+      const images = Array.from(incoming).filter((f) =>
+        f.type.startsWith("image/"),
+      );
+      if (images.length === 0) return;
+      onFilesChange([...files, ...images].slice(0, MAX_IMAGES));
     },
-    [onFileChange],
+    [files, onFilesChange],
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const f = e.dataTransfer.files[0];
-      if (f && f.type.startsWith("image/")) handleFile(f);
+      addFiles(e.dataTransfer.files);
     },
-    [handleFile],
+    [addFiles],
   );
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const f = e.target.files?.[0];
-      if (f) handleFile(f);
+      if (e.target.files) addFiles(e.target.files);
+      e.target.value = "";
     },
-    [handleFile],
+    [addFiles],
   );
 
-  const handleRemove = useCallback(() => {
-    onFileChange(null);
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(null);
-    if (inputRef.current) inputRef.current.value = "";
-  }, [onFileChange, preview]);
-
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
+  const handleRemove = useCallback(
+    (index: number) => {
+      onFilesChange(files.filter((_, i) => i !== index));
+    },
+    [files, onFilesChange],
+  );
 
   return (
     <div
-      className={`glass ${styles.dropzone} ${dragOver ? styles.dragOver : ""} ${file ? styles.hasFile : ""}`}
+      className={`glass ${styles.dropzone} ${dragOver ? styles.dragOver : ""} ${files.length > 0 ? styles.hasFile : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
-      onClick={() => !file && inputRef.current?.click()}
+      onClick={() => files.length === 0 && inputRef.current?.click()}
     >
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
+        multiple
         onChange={handleInputChange}
         className={styles.fileInput}
       />
 
-      {file && preview ? (
-        <div className={styles.previewWrap}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Preview" className={styles.preview} />
-          <div className={styles.overlay}>
-            <button className={styles.removeBtn} onClick={handleRemove}>
-              ✕ Remove
+      {files.length > 0 ? (
+        <div className={styles.grid}>
+          {files.map((file, i) => (
+            <div key={`${file.name}-${i}`} className={styles.thumbWrap}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={previews[i]} alt={file.name} className={styles.thumb} />
+              <span className={styles.thumbIndex}>{i + 1}</span>
+              <button
+                className={styles.thumbRemove}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRemove(i);
+                }}
+                aria-label={`Remove image ${i + 1}`}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {files.length < MAX_IMAGES && (
+            <button
+              className={styles.addTile}
+              onClick={(e) => {
+                e.stopPropagation();
+                inputRef.current?.click();
+              }}
+            >
+              <span className={styles.addIcon}>＋</span>
+              <span>Add</span>
             </button>
-            <span className={styles.fileSize}>{formatSize(file.size)}</span>
-          </div>
+          )}
         </div>
       ) : (
         <div className={styles.placeholder}>
           <span className={styles.icon}>📸</span>
           <p className={styles.label}>
-            Drop an image here or <span className={styles.browse}>browse</span>
+            Drop images here or <span className={styles.browse}>browse</span>
           </p>
-          <p className={styles.hint}>PNG, JPG, WebP — up to 25 MB</p>
+          <p className={styles.hint}>
+            Up to {MAX_IMAGES} images — they&apos;ll anchor scenes across your story
+          </p>
         </div>
       )}
     </div>
