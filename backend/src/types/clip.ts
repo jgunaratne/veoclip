@@ -30,6 +30,7 @@ export interface Clip {
   referenceImagePaths: string[]; // local filesystem paths (0..n images)
   speakerVoice: string;
   length: StoryLength; // 30, 60 or 180 seconds
+  ensureContinuity?: boolean;
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;

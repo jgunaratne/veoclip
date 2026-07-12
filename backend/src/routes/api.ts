@@ -116,7 +116,7 @@ apiRouter.post(
   async (req: Request, res: Response) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-    const { storyText, speakerVoice, length } = req.body;
+    const { storyText, speakerVoice, length, ensureContinuity } = req.body;
 
     if (!storyText || !storyText.trim()) {
       res.status(400).json({ error: 'storyText is required' });
@@ -142,6 +142,7 @@ apiRouter.post(
       referenceImagePaths: imagePaths,
       speakerVoice: speakerVoice || getDefaultVoice(),
       length: parsedLength,
+      ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
       status: 'idle',
     };
 
@@ -274,68 +275,116 @@ async function runPipeline(clipId: string): Promise<void> {
       status: 'generating_video',
     });
 
-    // ── Step 2: Generate Veo segments with frame chaining ────────────
+    // ── Step 2: Generate Veo segments (Sequential vs Parallel) ──────
     const seedAssignments = assignSeedImages(
       clip.referenceImagePaths,
       segmentCount,
     );
 
     const segmentPaths: string[] = [];
-    let chainedSeedPath: string | null = null;
+    const useContinuity = clip.ensureContinuity;
 
-    for (let seg = 0; seg < Math.min(story.scenes.length, segmentCount); seg++) {
-      updateClip(clipId, { currentSegment: seg + 1 });
-      console.log(
-        `[pipeline] Generating segment ${seg + 1}/${segmentCount} for clip ${clipId}`,
-      );
+    if (useContinuity) {
+      console.log(`[pipeline] Generating segments sequentially with continuity chaining`);
+      let chainedSeedPath: string | null = null;
 
-      // A user image assigned to this slot wins over the chained frame
-      const seedImagePath = seedAssignments.get(seg) ?? chainedSeedPath;
-
-      const scenePrompt = story.scenes[seg].prompt;
-      let segVideoPath: string;
-      try {
-        segVideoPath = await generateVideo({
-          imagePath: seedImagePath,
-          prompt: scenePrompt,
-          duration: SEGMENT_DURATION,
-          outputDir,
-          clipId: `${clipId}_seg${seg}`,
-        });
-      } catch (err) {
-        if (!(err instanceof VideoFilteredError)) throw err;
-        // Don't let one filtered scene sink the whole run —
-        // retry once with a deliberately safe abstract prompt.
+      for (let seg = 0; seg < Math.min(story.scenes.length, segmentCount); seg++) {
+        updateClip(clipId, { currentSegment: seg + 1 });
         console.log(
-          `[pipeline] Segment ${seg + 1} filtered (${err.message}); retrying with sanitized prompt`,
+          `[pipeline] Generating segment ${seg + 1}/${segmentCount} sequentially for clip ${clipId}`,
         );
-        segVideoPath = await generateVideo({
-          imagePath: seedImagePath,
-          prompt: SAFE_FALLBACK_SCENE,
-          duration: SEGMENT_DURATION,
-          outputDir,
-          clipId: `${clipId}_seg${seg}`,
-        });
-      }
 
-      segmentPaths.push(segVideoPath);
+        // A user image assigned to this slot wins over the chained frame
+        const seedImagePath = seedAssignments.get(seg) ?? chainedSeedPath;
+        const scenePrompt = story.scenes[seg].prompt;
+        let segVideoPath: string;
 
-      // Extract last frame for chaining (unless this is the last segment)
-      if (seg < segmentCount - 1) {
         try {
-          chainedSeedPath = await extractLastFrame({
-            videoPath: segVideoPath,
+          segVideoPath = await generateVideo({
+            imagePath: seedImagePath,
+            prompt: scenePrompt,
+            duration: SEGMENT_DURATION,
             outputDir,
-            clipId,
-            segmentIndex: seg,
+            clipId: `${clipId}_seg${seg}`,
           });
-        } catch {
-          console.warn(
-            `[pipeline] Couldn't extract last frame of segment ${seg + 1}; next segment won't be chained`,
+        } catch (err) {
+          if (!(err instanceof VideoFilteredError)) throw err;
+          console.log(
+            `[pipeline] Segment ${seg + 1} filtered (${err.message}); retrying with sanitized prompt`,
           );
-          chainedSeedPath = null;
+          segVideoPath = await generateVideo({
+            imagePath: seedImagePath,
+            prompt: SAFE_FALLBACK_SCENE,
+            duration: SEGMENT_DURATION,
+            outputDir,
+            clipId: `${clipId}_seg${seg}`,
+          });
+        }
+
+        segmentPaths.push(segVideoPath);
+
+        // Extract last frame for chaining (unless this is the last segment)
+        if (seg < segmentCount - 1) {
+          try {
+            chainedSeedPath = await extractLastFrame({
+              videoPath: segVideoPath,
+              outputDir,
+              clipId,
+              segmentIndex: seg,
+            });
+          } catch {
+            console.warn(
+              `[pipeline] Couldn't extract last frame of segment ${seg + 1}; next segment won't be chained`,
+            );
+            chainedSeedPath = null;
+          }
         }
       }
+    } else {
+      console.log(`[pipeline] Generating segments in parallel (continuity chaining disabled)`);
+      updateClip(clipId, { currentSegment: 0 });
+
+      let completedCount = 0;
+      const tasks = Array.from({ length: Math.min(story.scenes.length, segmentCount) }).map(
+        async (_, seg) => {
+          // In parallel mode, only user-assigned seed images are used (no chained frames)
+          const seedImagePath = seedAssignments.get(seg) ?? null;
+          const scenePrompt = story.scenes[seg].prompt;
+          let segVideoPath: string;
+
+          try {
+            segVideoPath = await generateVideo({
+              imagePath: seedImagePath,
+              prompt: scenePrompt,
+              duration: SEGMENT_DURATION,
+              outputDir,
+              clipId: `${clipId}_seg${seg}`,
+            });
+          } catch (err) {
+            if (!(err instanceof VideoFilteredError)) throw err;
+            console.log(
+              `[pipeline] Segment ${seg + 1} filtered (${err.message}); retrying with sanitized prompt`,
+            );
+            segVideoPath = await generateVideo({
+              imagePath: seedImagePath,
+              prompt: SAFE_FALLBACK_SCENE,
+              duration: SEGMENT_DURATION,
+              outputDir,
+              clipId: `${clipId}_seg${seg}`,
+            });
+          }
+
+          completedCount++;
+          updateClip(clipId, { currentSegment: completedCount });
+          console.log(`[pipeline] Parallel segment ${seg + 1}/${segmentCount} complete`);
+          return { seg, path: segVideoPath };
+        },
+      );
+
+      const results = await Promise.all(tasks);
+      // Ensure segment paths are sorted by their original segment index
+      results.sort((a, b) => a.seg - b.seg);
+      segmentPaths.push(...results.map((r) => r.path));
     }
 
     // Concatenate segments if we have more than one
