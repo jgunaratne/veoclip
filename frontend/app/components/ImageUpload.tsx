@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { useMemo } from "react";
+import { FileInput } from "@astryxdesign/core/FileInput";
 import styles from "./ImageUpload.module.css";
 
 const MAX_IMAGES = 8;
@@ -11,114 +12,49 @@ interface ImageUploadProps {
 }
 
 export default function ImageUpload({ files, onFilesChange }: ImageUploadProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [dragOver, setDragOver] = useState(false);
-
-  // Object URLs derived from the file list; revoked when the list changes
+  // Create stable object URLs for preview thumbnails
   const previews = useMemo(
-    () => files.map((f) => URL.createObjectURL(f)),
-    [files],
-  );
-  useEffect(() => {
-    return () => previews.forEach((u) => URL.revokeObjectURL(u));
-  }, [previews]);
-
-  const addFiles = useCallback(
-    (incoming: FileList | File[]) => {
-      const images = Array.from(incoming).filter((f) =>
-        f.type.startsWith("image/"),
-      );
-      if (images.length === 0) return;
-      onFilesChange([...files, ...images].slice(0, MAX_IMAGES));
-    },
-    [files, onFilesChange],
+    () => files.map((f) => ({ file: f, url: URL.createObjectURL(f) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [files.length],
   );
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      addFiles(e.dataTransfer.files);
-    },
-    [addFiles],
-  );
-
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files) addFiles(e.target.files);
-      e.target.value = "";
-    },
-    [addFiles],
-  );
-
-  const handleRemove = useCallback(
-    (index: number) => {
-      onFilesChange(files.filter((_, i) => i !== index));
-    },
-    [files, onFilesChange],
-  );
+  function removeFile(index: number) {
+    onFilesChange(files.filter((_, i) => i !== index));
+  }
 
   return (
-    <div
-      className={`glass ${styles.dropzone} ${dragOver ? styles.dragOver : ""} ${files.length > 0 ? styles.hasFile : ""}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={handleDrop}
-      onClick={() => files.length === 0 && inputRef.current?.click()}
-    >
-      <input
-        ref={inputRef}
-        type="file"
+    <div className={styles.root}>
+      <FileInput
+        label="Reference Images"
+        value={files}
+        onChange={(val) => {
+          if (!val) onFilesChange([]);
+          else if (Array.isArray(val)) onFilesChange(val);
+          else onFilesChange([val]);
+        }}
         accept="image/*"
-        multiple
-        onChange={handleInputChange}
-        className={styles.fileInput}
+        isMultiple
+        mode="dropzone"
+        maxFiles={MAX_IMAGES}
+        description={`Up to ${MAX_IMAGES} images — each anchors a scene in your video`}
       />
 
-      {files.length > 0 ? (
+      {previews.length > 0 && (
         <div className={styles.grid}>
-          {files.map((file, i) => (
-            <div key={`${file.name}-${i}`} className={styles.thumbWrap}>
+          {previews.map(({ file, url }, i) => (
+            <div key={url} className={styles.thumb}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previews[i]} alt={file.name} className={styles.thumb} />
-              <span className={styles.thumbIndex}>{i + 1}</span>
+              <img src={url} alt={file.name} className={styles.img} />
               <button
-                className={styles.thumbRemove}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRemove(i);
-                }}
-                aria-label={`Remove image ${i + 1}`}
+                className={styles.remove}
+                onClick={() => removeFile(i)}
+                aria-label={`Remove ${file.name}`}
               >
                 ✕
               </button>
             </div>
           ))}
-          {files.length < MAX_IMAGES && (
-            <button
-              className={styles.addTile}
-              onClick={(e) => {
-                e.stopPropagation();
-                inputRef.current?.click();
-              }}
-            >
-              <span className={styles.addIcon}>＋</span>
-              <span>Add</span>
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className={styles.placeholder}>
-          <span className={styles.icon}>📸</span>
-          <p className={styles.label}>
-            Drop images here or <span className={styles.browse}>browse</span>
-          </p>
-          <p className={styles.hint}>
-            Up to {MAX_IMAGES} images — they&apos;ll anchor scenes across your story
-          </p>
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "./DurationPicker.module.css";
+import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
 
 interface DurationPickerProps {
   value: number;
@@ -9,28 +9,21 @@ interface DurationPickerProps {
 
 // Story length in seconds → generated as chained 8 s Veo segments
 const OPTIONS = [
-  { value: 30, label: "30s", badge: "4 scenes" },
-  { value: 60, label: "1m", badge: "8 scenes" },
-  { value: 180, label: "3m", badge: "23 scenes" },
+  { value: 30, label: "30s · 4 scenes" },
+  { value: 60, label: "1m · 8 scenes" },
+  { value: 180, label: "3m · 23 scenes" },
 ];
 
 export default function DurationPicker({ value, onChange }: DurationPickerProps) {
   return (
-    <div className={styles.wrapper}>
-      <label className={styles.label}>Story Length</label>
-      <div className={styles.pills}>
-        {OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            className={`${styles.pill} ${value === opt.value ? styles.active : ""}`}
-            onClick={() => onChange(opt.value)}
-          >
-            {opt.label}
-            {opt.badge && <span className={styles.badge}>{opt.badge}</span>}
-          </button>
-        ))}
-      </div>
-    </div>
+    <SegmentedControl
+      label="Video duration"
+      value={String(value)}
+      onChange={(v) => onChange(Number(v))}
+    >
+      {OPTIONS.map((opt) => (
+        <SegmentedControlItem key={opt.value} value={String(opt.value)} label={opt.label} />
+      ))}
+    </SegmentedControl>
   );
 }

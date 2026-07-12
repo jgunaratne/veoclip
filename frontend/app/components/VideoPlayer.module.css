@@ -1,6 +1,5 @@
 /* Vertical 9:16 player, phone-shaped */
 .playerWrap {
-  border-radius: var(--radius-lg);
   overflow: hidden;
   animation: fadeIn 0.6s ease forwards;
   max-width: 360px;
@@ -12,6 +11,5 @@
   width: 100%;
   aspect-ratio: 9 / 16;
   background: #000;
-  border-radius: var(--radius-lg);
   outline: none;
 }

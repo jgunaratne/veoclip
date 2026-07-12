@@ -1,15 +1,13 @@
 "use client";
 
-import Link from "next/link";
-import styles from "./Navbar.module.css";
+import {TopNav} from '@astryxdesign/core/TopNav';
+import {TopNavHeading} from '@astryxdesign/core/TopNav';
 
 export default function Navbar() {
   return (
-    <nav className={`glass ${styles.navbar}`}>
-      <Link href="/" className={styles.brand}>
-        <span className={styles.logo}>🎬</span>
-        <span className={styles.name}>VeoClip</span>
-      </Link>
-    </nav>
+    <TopNav
+      heading={<TopNavHeading heading="VeoClip" headingHref="/" />}
+      startContent={<span>🎬</span>}
+    />
   );
 }

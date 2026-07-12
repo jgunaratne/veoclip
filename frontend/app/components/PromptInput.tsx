@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "./PromptInput.module.css";
+import {TextArea} from '@astryxdesign/core/TextArea';
 
 interface PromptInputProps {
   label: string;
@@ -17,26 +17,14 @@ export default function PromptInput({
   onChange,
   placeholder,
   maxLength,
-  rows = 4,
 }: PromptInputProps) {
   return (
-    <div className={styles.wrapper}>
-      <label className={styles.label}>{label}</label>
-      <div className={styles.textareaWrap}>
-        <textarea
-          className={styles.textarea}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          maxLength={maxLength}
-          rows={rows}
-        />
-        {maxLength && (
-          <span className={styles.count}>
-            {value.length} / {maxLength}
-          </span>
-        )}
-      </div>
-    </div>
+    <TextArea
+      label={label}
+      value={value}
+      changeAction={(val) => onChange(val)}
+      placeholder={placeholder}
+      maxLength={maxLength}
+    />
   );
 }
