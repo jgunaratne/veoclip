@@ -1,0 +1,14 @@
+.playerWrap {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: fadeIn 0.6s ease forwards;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  max-height: 500px;
+  background: #000;
+  border-radius: var(--radius-lg);
+  outline: none;
+}
