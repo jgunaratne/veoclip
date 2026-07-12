@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import sharp from 'sharp';
 import type { Clip, StoryLength } from '../types/clip.js';
 import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
@@ -55,6 +56,28 @@ const upload = multer({
   },
 });
 
+// Formats that Veo doesn't accept — convert these to JPEG after upload.
+const CONVERT_EXTENSIONS = new Set(['.avif', '.webp', '.heic', '.heif', '.tiff', '.tif']);
+
+/**
+ * If the uploaded file is in a format Veo can't consume (e.g. AVIF),
+ * convert it to JPEG using sharp and return the new path.
+ * Otherwise return the original path unchanged.
+ */
+async function ensureJpeg(filePath: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!CONVERT_EXTENSIONS.has(ext)) return filePath;
+
+  const jpegPath = filePath.replace(/\.[^.]+$/, '.jpg');
+  await sharp(filePath).jpeg({ quality: 90 }).toFile(jpegPath);
+
+  // Remove the original to avoid clutter
+  await fs.unlink(filePath).catch(() => {});
+
+  console.log(`[upload] Converted ${path.basename(filePath)} → ${path.basename(jpegPath)}`);
+  return jpegPath;
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -90,7 +113,7 @@ apiRouter.get('/clips/:id', (req: Request, res: Response) => {
 apiRouter.post(
   '/clips',
   upload.array('images', MAX_IMAGES),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
     const { storyText, speakerVoice, length } = req.body;
@@ -106,12 +129,17 @@ apiRouter.post(
       return;
     }
 
+    // Convert any non-JPEG/PNG uploads (AVIF, WEBP, HEIC, etc.) to JPEG
+    const imagePaths = await Promise.all(
+      files.map((f) => ensureJpeg(f.path)),
+    );
+
     const clip: Clip = {
       id: uuidv4(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       storyText,
-      referenceImagePaths: files.map((f) => f.path),
+      referenceImagePaths: imagePaths,
       speakerVoice: speakerVoice || getDefaultVoice(),
       length: parsedLength,
       status: 'idle',

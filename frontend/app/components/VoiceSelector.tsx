@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import styles from "./VoiceSelector.module.css";
+import {Selector} from '@astryxdesign/core/Selector';
 
 interface Voice {
   id: string;
@@ -40,36 +40,22 @@ export default function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Build options sorted by gender (Male first, then Female) to preserve
+  // the original optgroup ordering in a flat list.
   const maleVoices = voices.filter((v) => v.gender === "MALE");
   const femaleVoices = voices.filter((v) => v.gender === "FEMALE");
+  const options = [
+    ...maleVoices.map((v) => ({ value: v.id, label: `${v.name}` })),
+    ...femaleVoices.map((v) => ({ value: v.id, label: `${v.name}` })),
+  ];
 
   return (
-    <div className={styles.wrapper}>
-      <label className={styles.label}>Voice</label>
-      <select
-        className={styles.select}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {maleVoices.length > 0 && (
-          <optgroup label="Male">
-            {maleVoices.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {femaleVoices.length > 0 && (
-          <optgroup label="Female">
-            {femaleVoices.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </optgroup>
-        )}
-      </select>
-    </div>
+    <Selector
+      label="Voice"
+      options={options}
+      value={value}
+      onChange={onChange}
+      placeholder="Select a voice"
+    />
   );
 }

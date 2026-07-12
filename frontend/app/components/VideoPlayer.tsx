@@ -1,5 +1,6 @@
 "use client";
 
+import { Card } from "@astryxdesign/core/Card";
 import styles from "./VideoPlayer.module.css";
 
 interface VideoPlayerProps {
@@ -9,7 +10,7 @@ interface VideoPlayerProps {
 
 export default function VideoPlayer({ src, poster }: VideoPlayerProps) {
   return (
-    <div className={`glass ${styles.playerWrap}`}>
+    <Card padding={0} className={styles.playerWrap}>
       <video
         className={styles.video}
         src={src}
@@ -18,6 +19,6 @@ export default function VideoPlayer({ src, poster }: VideoPlayerProps) {
         autoPlay
         playsInline
       />
-    </div>
+    </Card>
   );
 }

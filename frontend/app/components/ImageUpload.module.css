@@ -1,182 +1,51 @@
-.dropzone {
-  position: relative;
-  border-radius: var(--radius-lg);
-  min-height: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  overflow: hidden;
-  border: 2px dashed var(--border-medium);
-}
-.dropzone:hover {
-  border-color: var(--accent-primary);
-  background: rgba(124, 58, 237, 0.04);
-}
-.dragOver {
-  border-color: var(--accent-secondary) !important;
-  background: rgba(124, 58, 237, 0.08) !important;
-  animation: glow 1.5s ease-in-out infinite;
-}
-.hasFile {
-  border-style: solid;
-  border-color: var(--border-light);
-  cursor: default;
-}
-
-.fileInput {
-  display: none;
-}
-
-/* Placeholder */
-.placeholder {
+.root {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 2rem;
-}
-.icon {
-  font-size: 2.5rem;
-  margin-bottom: 4px;
-}
-.label {
-  font-size: 1rem;
-  color: var(--text-secondary);
-}
-.browse {
-  color: var(--accent-tertiary);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.hint {
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  gap: 12px;
 }
 
-/* Thumbnail grid (multi-image) */
+/* Thumbnail grid */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 10px;
-  width: 100%;
-  padding: 12px;
-  align-self: flex-start;
-}
-.thumbWrap {
-  position: relative;
-  aspect-ratio: 9 / 16;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-.thumb {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.thumbIndex {
-  position: absolute;
-  bottom: 6px;
-  left: 6px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 600;
-}
-.thumbRemove {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(244, 63, 94, 0.85);
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity var(--transition-normal);
-}
-.thumbWrap:hover .thumbRemove {
-  opacity: 1;
-}
-.addTile {
-  aspect-ratio: 9 / 16;
-  border-radius: var(--radius-sm);
-  border: 2px dashed var(--border-medium);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  transition: all var(--transition-normal);
-}
-.addTile:hover {
-  border-color: var(--accent-primary);
-  color: var(--accent-tertiary);
-}
-.addIcon {
-  font-size: 1.4rem;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
 }
 
-/* Preview */
-.previewWrap {
+.thumb {
   position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: 320px;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-background-surface, #1a1a2e);
 }
-.preview {
-  display: block;
+
+.img {
   width: 100%;
   height: 100%;
-  min-height: 320px;
   object-fit: cover;
-  border-radius: var(--radius-lg);
+  display: block;
 }
-.overlay {
+
+.remove {
   position: absolute;
-  inset: 0;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 0.65rem;
+  line-height: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  background: rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transition: opacity var(--transition-normal);
-  border-radius: var(--radius-lg);
+  transition: opacity 150ms ease;
 }
-.previewWrap:hover .overlay {
+
+.thumb:hover .remove {
   opacity: 1;
-}
-.removeBtn {
-  padding: 8px 20px;
-  border-radius: var(--radius-sm);
-  background: rgba(244, 63, 94, 0.8);
-  color: #fff;
-  font-size: 0.85rem;
-  font-weight: 600;
-  backdrop-filter: blur(4px);
-}
-.removeBtn:hover {
-  background: rgba(244, 63, 94, 1);
-}
-.fileSize {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
 }
