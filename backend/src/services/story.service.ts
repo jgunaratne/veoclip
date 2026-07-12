@@ -47,7 +47,7 @@ ${targetSeconds} seconds of natural speech — it must not run over. It should t
 informative, objective, and realistic story drawn from the source text, mimicking the style of a serious \
 journalistic, educational, or historical documentary (e.g., PBS Frontline or BBC Horizon).
 - Do NOT use generic intro/outro phrases, promotional hooks, or cinematic cliches (e.g., "Join us...", "In this video...", "Discover the secrets of...", "Let's explore...").
-- Every single sentence must convey concrete information, key facts, specific dates, names of real people, places, or organizations, and actual statistics/numbers from the source text.
+- Prefer to convey concrete information, key facts, specific dates, names of real people, places, or organizations, and actual statistics/numbers from the source text.
 - Prioritize accuracy, objectivity, and informativeness over dramatic narrative or creative embellishment. Avoid vague summaries or simplifying details.
 
 2. Exactly ${segmentCount} scene descriptions for 8-second video segments that flow as \
