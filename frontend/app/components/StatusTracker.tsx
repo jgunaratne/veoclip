@@ -42,6 +42,8 @@ function stepState(
   currentStatus: ClipStatus,
 ): "done" | "active" | "pending" {
   if (currentStatus === "error") return "pending";
+  // When fully complete, every step (including the complete step) is done
+  if (currentStatus === "complete") return "done";
   const ci = ORDER[currentStatus] ?? -1;
   const si = ORDER[stepKey] ?? -1;
   if (si < ci) return "done";

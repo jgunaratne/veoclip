@@ -144,3 +144,57 @@ export const SAFE_FALLBACK_SCENE =
   'A slow cinematic camera drift through an abstract, softly lit landscape of ' +
   'light, color, and gentle shapes, evoking a calm documentary mood. Ambient ' +
   'sound only. No people, no text, no dialogue.';
+
+// ---------------------------------------------------------------------------
+// Character profile auto-generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Given the user's pasted source text, use Gemini to suggest a fitting narrator
+ * character profile — a short persona description that the TTS model can adopt.
+ */
+export async function generateCharacterProfile(storyText: string): Promise<string> {
+  const model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
+  const { url, headers } = await getGenerateContentEndpoint(model);
+
+  const prompt = `Based on the following source text, suggest a narrator character persona for a ` +
+    `documentary-style video narration. The persona should be 1-3 sentences describing who the ` +
+    `narrator is, their tone, speaking style, and emotional register — like casting direction ` +
+    `for a voice actor.\n\n` +
+    `Guidelines:\n` +
+    `- Match the subject matter: a tech article might suit a curious, sharp-witted journalist; ` +
+    `a war story might suit a seasoned foreign correspondent.\n` +
+    `- Be specific about vocal qualities: pace, gravitas, warmth, authority, etc.\n` +
+    `- Keep it under 200 characters — concise enough to be a stage direction.\n\n` +
+    `Source text (first 3000 chars):\n${storyText.slice(0, 3000)}\n\n` +
+    `Return ONLY the persona description string — no quotes, no JSON, no explanation.`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.9, maxOutputTokens: 256 },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Character generation failed: ${response.status} ${errorText.slice(0, 200)}`);
+  }
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const json = (await response.json()) as Record<string, any>;
+  const parts: any[] = json?.candidates?.[0]?.content?.parts ?? [];
+  const text = parts
+    .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+    .join('')
+    .trim();
+
+  if (!text) {
+    throw new Error('Character generation returned empty response');
+  }
+
+  console.log(`[story] Character profile generated: ${text.slice(0, 100)}…`);
+  return text;
+}

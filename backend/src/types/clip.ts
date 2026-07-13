@@ -29,6 +29,7 @@ export interface Clip {
   storyText: string; // pasted source text the story is written from
   referenceImagePaths: string[]; // local filesystem paths (0..n images)
   speakerVoice: string;
+  characterProfile?: string; // persona description — shapes how the TTS narrates
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
 

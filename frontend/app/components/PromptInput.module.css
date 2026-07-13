@@ -1,1 +1,9 @@
-/* Styling handled by Astryx TextArea */
+.root {
+  display: block;
+}
+
+/* Force the textarea inside the Astryx TextArea to respect our min-height */
+.root textarea {
+  min-height: var(--prompt-min-height, 30rem) !important;
+  resize: vertical;
+}
