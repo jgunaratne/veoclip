@@ -61,6 +61,7 @@ function getTtsClient() {
 async function generateVoiceoverCloud(opts: {
   script: string;
   voice: string;
+  characterProfile?: string;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
@@ -97,19 +98,39 @@ async function generateVoiceoverCloud(opts: {
 async function generateVoiceoverGemini(opts: {
   script: string;
   voice: string;
+  characterProfile?: string;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  const { script, voice, outputDir, clipId } = opts;
+  const { script, voice, characterProfile, outputDir, clipId } = opts;
 
   const model = process.env.TTS_MODEL || 'gemini-3.1-flash-tts-preview';
   const { url, headers } = await getGenerateContentEndpoint(model);
+
+  // When a character profile is set, wrap the narration script with stage
+  // direction so the TTS model adopts the persona's vocal quality and
+  // delivery style — following the podchat custom-character-voice pattern.
+  let ttsText = script;
+  if (characterProfile) {
+    ttsText = [
+      `[NARRATOR VOICE DIRECTION]`,
+      `Adopt the following narrator persona for this entire reading. `,
+      `Speak naturally in-character — adjust your tone, pacing, emphasis, `,
+      `and emotional delivery to match this profile:`,
+      ``,
+      characterProfile,
+      ``,
+      `[BEGIN NARRATION]`,
+      ``,
+      script,
+    ].join('\n');
+  }
 
   const response = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: script }] }],
+      contents: [{ role: 'user', parts: [{ text: ttsText }] }],
       generationConfig: {
         responseModalities: ['AUDIO'],
         speechConfig: {
@@ -173,6 +194,7 @@ async function generateVoiceoverGemini(opts: {
 export async function generateVoiceover(opts: {
   script: string;
   voice: string;
+  characterProfile?: string;
   outputDir: string;
   clipId: string;
 }): Promise<string> {

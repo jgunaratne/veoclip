@@ -1,1 +1,12 @@
-/* Styling handled by Astryx SegmentedControl */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #888);
+  margin: 0;
+  padding-left: 2px;
+}

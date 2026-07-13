@@ -15,7 +15,7 @@ import {
   subscribeToClip,
 } from '../store.js';
 import { generateVideo, VideoFilteredError } from '../services/veo.service.js';
-import { generateStory, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
+import { generateStory, generateCharacterProfile, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
 import {
   generateVoiceover,
   getAvailableVoices,
@@ -109,6 +109,22 @@ apiRouter.get('/clips/:id', (req: Request, res: Response) => {
   res.json(clip);
 });
 
+// Suggest a narrator character profile based on the pasted source text
+apiRouter.post('/suggest-character', async (req: Request, res: Response) => {
+  const { storyText } = req.body;
+  if (!storyText || typeof storyText !== 'string' || !storyText.trim()) {
+    res.status(400).json({ error: 'storyText is required' });
+    return;
+  }
+  try {
+    const profile = await generateCharacterProfile(storyText);
+    res.json({ characterProfile: profile });
+  } catch (err) {
+    console.error('[api] Character suggestion failed:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // Create a new clip (multipart: image files + text fields)
 apiRouter.post(
   '/clips',
@@ -116,7 +132,7 @@ apiRouter.post(
   async (req: Request, res: Response) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-    const { storyText, speakerVoice, length, ensureContinuity } = req.body;
+    const { storyText, speakerVoice, length, ensureContinuity, characterProfile } = req.body;
 
     if (!storyText || !storyText.trim()) {
       res.status(400).json({ error: 'storyText is required' });
@@ -141,6 +157,7 @@ apiRouter.post(
       storyText,
       referenceImagePaths: imagePaths,
       speakerVoice: speakerVoice || getDefaultVoice(),
+      characterProfile: characterProfile?.trim() || undefined,
       length: parsedLength,
       ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
       status: 'idle',
@@ -410,6 +427,7 @@ async function runPipeline(clipId: string): Promise<void> {
     const audioPath = await generateVoiceover({
       script: story.narrationScript,
       voice: clip.speakerVoice,
+      characterProfile: clip.characterProfile,
       outputDir,
       clipId,
     });

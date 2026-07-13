@@ -39,8 +39,48 @@ export default function CreatePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [storyText, setStoryText] = useState("");
   const [voice, setVoice] = useState("Puck");
+  const [characterProfile, setCharacterProfile] = useState("");
+  const [isCharacterSuggesting, setIsCharacterSuggesting] = useState(false);
   const [length, setLength] = useState(30);
   const [ensureContinuity, setEnsureContinuity] = useState(false);
+
+  // Track whether the user has manually edited the character field
+  const userEditedCharacter = useRef(false);
+
+  // Auto-suggest a narrator character when text is pasted (debounced)
+  useEffect(() => {
+    // Only auto-suggest if: text is substantial, user hasn't typed their own,
+    // and we haven't already suggested one for this text
+    if (storyText.length < 100 || userEditedCharacter.current) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setIsCharacterSuggesting(true);
+      try {
+        const res = await fetch("/api/suggest-character", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ storyText }),
+          signal: controller.signal,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.characterProfile && !userEditedCharacter.current) {
+            setCharacterProfile(data.characterProfile);
+          }
+        }
+      } catch {
+        // Ignore — suggestion is best-effort
+      } finally {
+        setIsCharacterSuggesting(false);
+      }
+    }, 1500);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [storyText]);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -90,6 +130,9 @@ export default function CreatePage() {
       formData.append("speakerVoice", voice);
       formData.append("length", String(length));
       formData.append("ensureContinuity", String(ensureContinuity));
+      if (characterProfile.trim()) {
+        formData.append("characterProfile", characterProfile.trim());
+      }
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -154,7 +197,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [files, storyText, voice, length, startPolling]);
+  }, [files, storyText, voice, length, ensureContinuity, characterProfile, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
@@ -176,6 +219,9 @@ export default function CreatePage() {
       ? `/media/${clip.videoPath.split("/").pop()}`
       : null;
 
+  const showRightColumn =
+    clip && clip.status !== "idle";
+
   return (
     <>
       <Navbar />
@@ -189,26 +235,51 @@ export default function CreatePage() {
         </div>
 
         <div className={styles.grid}>
-          {/* Left column — Images */}
+          {/* Full-width status bar — spans all 3 columns */}
+          {clip && clip.status !== "idle" && (
+            <div className={styles.statusBar}>
+              <StatusTracker
+                status={clip.status}
+                error={clip.error}
+                currentSegment={clip.currentSegment}
+                totalSegments={clip.totalSegments}
+                onRetry={handleRetry}
+              />
+            </div>
+          )}
+
+          {/* Column 1 — Images */}
           <div className={styles.left}>
             <ImageUpload files={files} onFilesChange={setFiles} />
           </div>
 
-          {/* Right column — Controls */}
-          <div className={styles.right}>
+          {/* Column 2 — Story text + controls */}
+          <div className={styles.middle}>
             <PromptInput
               label="Story Text"
               value={storyText}
               onChange={setStoryText}
               placeholder="Paste the text your story should be based on — an article, notes, a chapter… The AI writes the narration and scenes from it."
-              maxLength={20000}
-              rows={12}
+              maxLength={100000}
+              rows={20}
             />
 
             <div className={styles.settings}>
               <DurationPicker value={length} onChange={setLength} />
               <VoiceSelector value={voice} onChange={setVoice} />
             </div>
+
+            <PromptInput
+              label={isCharacterSuggesting ? "Narrator Character — suggesting…" : "Narrator Character (auto-suggested)"}
+              value={characterProfile}
+              onChange={(val) => {
+                userEditedCharacter.current = val.length > 0;
+                setCharacterProfile(val);
+              }}
+              placeholder="Describe the narrator’s persona — e.g. ‘A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency’. Leave empty for a neutral narrator."
+              maxLength={2000}
+              rows={3}
+            />
 
             <CheckboxInput
               label="Ensure visual continuity between scenes"
@@ -238,34 +309,23 @@ export default function CreatePage() {
               </Banner>
             )}
           </div>
+
+          {/* Column 3 — Video (shown when complete) */}
+          <div className={styles.right}>
+            {clip?.status === "complete" && finalVideoUrl && (
+              <div className={styles.resultSection}>
+                <VideoPlayer src={finalVideoUrl} />
+                <a
+                  href={finalVideoUrl}
+                  download={`veoclip_${clip.id}.mp4`}
+                  className={`btn-primary ${styles.downloadBtn}`}
+                >
+                  <span>⬇ Download Video</span>
+                </a>
+              </div>
+            )}
+          </div>
         </div>
-
-        {/* Status tracker */}
-        {clip && clip.status !== "idle" && (
-          <section className={styles.statusSection}>
-            <StatusTracker
-              status={clip.status}
-              error={clip.error}
-              currentSegment={clip.currentSegment}
-              totalSegments={clip.totalSegments}
-              onRetry={handleRetry}
-            />
-          </section>
-        )}
-
-        {/* Video player + download */}
-        {clip?.status === "complete" && finalVideoUrl && (
-          <section className={styles.resultSection}>
-            <VideoPlayer src={finalVideoUrl} />
-            <a
-              href={finalVideoUrl}
-              download={`veoclip_${clip.id}.mp4`}
-              className={`btn-primary ${styles.downloadBtn}`}
-            >
-              <span>⬇ Download Video</span>
-            </a>
-          </section>
-        )}
       </main>
     </>
   );

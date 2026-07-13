@@ -17,6 +17,39 @@
   border-radius: 8px;
   overflow: hidden;
   background: var(--color-background-surface, #1a1a2e);
+  cursor: grab;
+  transition: transform 150ms ease, box-shadow 150ms ease, outline-color 150ms ease;
+  outline: 2px solid transparent;
+}
+
+.thumb:active {
+  cursor: grabbing;
+}
+
+/* Visual feedback while dragging over a target slot */
+.thumbDropTarget {
+  outline-color: var(--color-border-accent, #7c3aed);
+  transform: scale(1.06);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.35);
+}
+
+/* Order badge (scene number) */
+.orderBadge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .img {
@@ -24,6 +57,7 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  pointer-events: none; /* prevent ghost image of child */
 }
 
 .remove {
@@ -44,6 +78,7 @@
   justify-content: center;
   opacity: 0;
   transition: opacity 150ms ease;
+  z-index: 2;
 }
 
 .thumb:hover .remove {
