@@ -4,6 +4,7 @@ export type ClipStatus =
   | 'preparing_script'
   | 'generating_video'
   | 'generating_audio'
+  | 'generating_music'
   | 'muxing'
   | 'complete'
   | 'error';
@@ -30,12 +31,14 @@ export interface Clip {
   referenceImagePaths: string[]; // local filesystem paths (0..n images)
   speakerVoice: string;
   characterProfile?: string; // persona description — shapes how the TTS narrates
+  enableMusic?: boolean; // generate background music via Lyria
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;
   scenePrompts?: string[];
+  caption?: string; // TikTok/social media caption
 
   // Status
   status: ClipStatus;

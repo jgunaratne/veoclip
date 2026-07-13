@@ -6,6 +6,7 @@ import { getGenerateContentEndpoint } from './google-auth.js';
 export interface StoryScript {
   narrationScript: string;
   scenes: { prompt: string }[];
+  caption: string;
 }
 
 function mimeTypeFor(imagePath: string): string {
@@ -59,6 +60,10 @@ violence, weapons, suffering. While avoiding identifiable real or historical peo
 video safety filters, describe stylized representations or visually abstract depictions of the events/concepts \
 mentioned in the narration.${imageNote}
 
+3. A TikTok/social media caption (max 300 characters including hashtags). It should be attention-grabbing, \
+informative, and include 3-5 relevant hashtags. Do NOT use generic hashtags like #fyp or #viral — use \
+topic-specific ones drawn from the content.
+
 Source text:
 ${storyText.slice(0, 6000)}
 
@@ -68,7 +73,8 @@ Return ONLY valid JSON (no markdown fences) with this structure:
   "scenes": [
     {"prompt": "Scene 1 description..."},
     {"prompt": "Scene 2 description..."}
-  ]
+  ],
+  "caption": "Your TikTok caption with #hashtags"
 }`;
 
   // Attach the reference images so the story actually reflects them
@@ -157,24 +163,31 @@ export async function generateCharacterProfile(storyText: string): Promise<strin
   const model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
   const { url, headers } = await getGenerateContentEndpoint(model);
 
-  const prompt = `Based on the following source text, suggest a narrator character persona for a ` +
-    `documentary-style video narration. The persona should be 1-3 sentences describing who the ` +
-    `narrator is, their tone, speaking style, and emotional register — like casting direction ` +
-    `for a voice actor.\n\n` +
-    `Guidelines:\n` +
-    `- Match the subject matter: a tech article might suit a curious, sharp-witted journalist; ` +
-    `a war story might suit a seasoned foreign correspondent.\n` +
-    `- Be specific about vocal qualities: pace, gravitas, warmth, authority, etc.\n` +
-    `- Keep it under 200 characters — concise enough to be a stage direction.\n\n` +
+  const prompt = `You are a casting director writing voice-over direction for a documentary narrator. ` +
+    `Based on the source text below, write a detailed narrator persona description.\n\n` +
+    `Your description MUST include ALL of the following:\n` +
+    `1. WHO the narrator is — their background, expertise, and perspective\n` +
+    `2. VOCAL QUALITIES — pitch, timbre, accent hints (e.g. "mid-Atlantic", "warm Southern")\n` +
+    `3. PACING AND RHYTHM — speaking speed, use of pauses, cadence\n` +
+    `4. EMOTIONAL REGISTER — gravitas, warmth, curiosity, urgency, wry humor, etc.\n` +
+    `5. DELIVERY STYLE — conversational vs. formal, intimate vs. authoritative\n\n` +
+    `Example of the level of detail expected:\n` +
+    `"A seasoned foreign correspondent who has spent decades covering conflict zones across the Middle East ` +
+    `and Central Asia. Speaks with quiet authority and measured gravitas — unhurried, deliberate pacing with ` +
+    `meaningful pauses between key revelations. A deep, resonant baritone with traces of a mid-Atlantic accent. ` +
+    `Emotionally restrained but not cold; conveys weight and consequence through understatement rather than ` +
+    `dramatic emphasis. Think of a veteran PBS Frontline narrator."\n\n` +
+    `Write 3-5 sentences (150-400 words). Be vivid and specific.\n\n` +
     `Source text (first 3000 chars):\n${storyText.slice(0, 3000)}\n\n` +
-    `Return ONLY the persona description string — no quotes, no JSON, no explanation.`;
+    `Return ONLY the persona description — no quotes, no JSON, no preamble, no explanation, ` +
+    `no word counts, no self-review, no meta-commentary. Just the persona itself.`;
 
   const response = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.9, maxOutputTokens: 256 },
+      generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
     }),
   });
 
@@ -185,6 +198,7 @@ export async function generateCharacterProfile(storyText: string): Promise<strin
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const json = (await response.json()) as Record<string, any>;
+  const finishReason = json?.candidates?.[0]?.finishReason;
   const parts: any[] = json?.candidates?.[0]?.content?.parts ?? [];
   const text = parts
     .map((p) => (typeof p?.text === 'string' ? p.text : ''))
@@ -195,6 +209,29 @@ export async function generateCharacterProfile(storyText: string): Promise<strin
     throw new Error('Character generation returned empty response');
   }
 
-  console.log(`[story] Character profile generated: ${text.slice(0, 100)}…`);
-  return text;
+  console.log(`[story] Character profile raw (${text.length} chars, finishReason=${finishReason}): ${text.slice(0, 200)}…`);
+
+  // Strip model self-review / meta-commentary that sometimes leaks through.
+  // Look for lines that are clearly not part of the persona description.
+  const metaPatterns = [
+    /^let'?s\s+(review|check|verify|count)/i,
+    /^(word|sentence|character)\s*(count|check)/i,
+    /^\*\s*(sentences|words|word count)/i,
+    /^(here is|here's|note:|caveat:|explanation:)/i,
+    /^(i |my |this |the above)/i,
+    /^\d+\s*(sentences?|words?)\s*[.:(]/i,
+  ];
+
+  const cleaned = text
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true; // keep blank lines between paragraphs
+      return !metaPatterns.some((pat) => pat.test(trimmed));
+    })
+    .join('\n')
+    .trim();
+
+  console.log(`[story] Character profile cleaned (${cleaned.length} chars): ${cleaned.slice(0, 200)}…`);
+  return cleaned || text; // fall back to raw text if cleaning removes everything
 }

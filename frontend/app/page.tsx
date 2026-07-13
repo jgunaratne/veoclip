@@ -19,6 +19,7 @@ type ClipStatus =
   | "preparing_script"
   | "generating_video"
   | "generating_audio"
+  | "generating_music"
   | "muxing"
   | "complete"
   | "error";
@@ -28,6 +29,7 @@ interface Clip {
   status: ClipStatus;
   error?: string;
   narrationScript?: string;
+  caption?: string;
   currentSegment?: number;
   totalSegments?: number;
   finalPath?: string;
@@ -39,48 +41,40 @@ export default function CreatePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [storyText, setStoryText] = useState("");
   const [voice, setVoice] = useState("Puck");
+  const [useCustomVoice, setUseCustomVoice] = useState(false);
   const [characterProfile, setCharacterProfile] = useState("");
   const [isCharacterSuggesting, setIsCharacterSuggesting] = useState(false);
   const [length, setLength] = useState(30);
   const [ensureContinuity, setEnsureContinuity] = useState(false);
+  const [enableMusic, setEnableMusic] = useState(true);
 
-  // Track whether the user has manually edited the character field
-  const userEditedCharacter = useRef(false);
-
-  // Auto-suggest a narrator character when text is pasted (debounced)
-  useEffect(() => {
-    // Only auto-suggest if: text is substantial, user hasn't typed their own,
-    // and we haven't already suggested one for this text
-    if (storyText.length < 100 || userEditedCharacter.current) return;
-
+  // Generate a narrator character on-demand via button click
+  const suggestCharacterRef = useRef<AbortController | null>(null);
+  const handleSuggestCharacter = useCallback(async () => {
+    if (!storyText.trim() || isCharacterSuggesting) return;
+    suggestCharacterRef.current?.abort();
     const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setIsCharacterSuggesting(true);
-      try {
-        const res = await fetch("/api/suggest-character", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ storyText }),
-          signal: controller.signal,
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.characterProfile && !userEditedCharacter.current) {
-            setCharacterProfile(data.characterProfile);
-          }
+    suggestCharacterRef.current = controller;
+    setIsCharacterSuggesting(true);
+    try {
+      const res = await fetch("/api/suggest-character", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyText }),
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.characterProfile) {
+          setCharacterProfile(data.characterProfile);
         }
-      } catch {
-        // Ignore — suggestion is best-effort
-      } finally {
-        setIsCharacterSuggesting(false);
       }
-    }, 1500);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [storyText]);
+    } catch {
+      // Ignore — suggestion is best-effort
+    } finally {
+      setIsCharacterSuggesting(false);
+    }
+  }, [storyText, isCharacterSuggesting]);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -130,7 +124,8 @@ export default function CreatePage() {
       formData.append("speakerVoice", voice);
       formData.append("length", String(length));
       formData.append("ensureContinuity", String(ensureContinuity));
-      if (characterProfile.trim()) {
+      formData.append("enableMusic", String(enableMusic));
+      if (useCustomVoice && characterProfile.trim()) {
         formData.append("characterProfile", characterProfile.trim());
       }
 
@@ -197,7 +192,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [files, storyText, voice, length, ensureContinuity, characterProfile, startPolling]);
+  }, [files, storyText, voice, length, ensureContinuity, enableMusic, useCustomVoice, characterProfile, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
@@ -268,24 +263,44 @@ export default function CreatePage() {
               <DurationPicker value={length} onChange={setLength} />
               <VoiceSelector value={voice} onChange={setVoice} />
             </div>
-
-            <PromptInput
-              label={isCharacterSuggesting ? "Narrator Character — suggesting…" : "Narrator Character (auto-suggested)"}
-              value={characterProfile}
-              onChange={(val) => {
-                userEditedCharacter.current = val.length > 0;
-                setCharacterProfile(val);
-              }}
-              placeholder="Describe the narrator’s persona — e.g. ‘A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency’. Leave empty for a neutral narrator."
-              maxLength={2000}
-              rows={3}
+            <CheckboxInput
+              label="Use custom character voice"
+              description="Give the narrator a distinct persona — tone, pacing, and personality."
+              value={useCustomVoice}
+              onChange={(checked) => setUseCustomVoice(checked)}
             />
+
+            {useCustomVoice && (
+              <div className={styles.characterSection}>
+                <PromptInput
+                  label={isCharacterSuggesting ? "Narrator Character — generating…" : "Narrator Character"}
+                  value={characterProfile}
+                  onChange={setCharacterProfile}
+                  placeholder="Describe the narrator's persona — e.g. 'A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency'."
+                  maxLength={2000}
+                  rows={3}
+                />
+                <Button
+                  variant="secondary"
+                  label={isCharacterSuggesting ? "Generating…" : "✨ Auto-generate from text"}
+                  isDisabled={!storyText.trim() || isCharacterSuggesting}
+                  clickAction={handleSuggestCharacter}
+                />
+              </div>
+            )}
 
             <CheckboxInput
               label="Ensure visual continuity between scenes"
               description="Tightly links visual flow between scenes (generates sequentially, takes 10-20 minutes). If disabled, scenes generate in parallel (takes ~2 minutes)."
               value={ensureContinuity}
               onChange={(checked) => setEnsureContinuity(checked)}
+            />
+
+            <CheckboxInput
+              label="Add background music"
+              description="Generates a soft, atmospheric instrumental score via Lyria 3 and mixes it under the narration."
+              value={enableMusic}
+              onChange={(checked) => setEnableMusic(checked)}
             />
 
             <Button
@@ -322,6 +337,20 @@ export default function CreatePage() {
                 >
                   <span>⬇ Download Video</span>
                 </a>
+
+                {clip.caption && (
+                  <div className={styles.captionBox}>
+                    <label className={styles.captionLabel}>TikTok Caption</label>
+                    <p className={styles.captionText}>{clip.caption}</p>
+                    <Button
+                      variant="secondary"
+                      label="📋 Copy Caption"
+                      clickAction={() => {
+                        navigator.clipboard.writeText(clip.caption!);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

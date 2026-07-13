@@ -41,10 +41,11 @@ function atempoChain(ratio: number): string {
 export async function muxVideoAudio(opts: {
   videoPath: string;
   audioPath: string;
+  backgroundMusicPath?: string;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  const { videoPath, audioPath, outputDir, clipId } = opts;
+  const { videoPath, audioPath, backgroundMusicPath, outputDir, clipId } = opts;
   const outputPath = path.join(outputDir, `${clipId}_final.mp4`);
 
   const [videoDuration, audioDuration] = await Promise.all([
@@ -52,6 +53,55 @@ export async function muxVideoAudio(opts: {
     getMediaDuration(audioPath),
   ]);
 
+  // When background music is provided, mix narration + music using ffmpeg
+  // complex filter. Music is at ~12% volume (-18dB) so it doesn't overpower
+  // the narration.
+  if (backgroundMusicPath) {
+    // Build atempo filter string for narration if it overruns the video
+    let narrationFilter = '[1:a]';
+    if (audioDuration > videoDuration && videoDuration > 0) {
+      const ratio = audioDuration / videoDuration;
+      narrationFilter = `[1:a]${atempoChain(ratio)}[narr];[narr]`;
+      console.log(
+        `[ffmpeg] Narration overran video by ${((ratio - 1) * 100).toFixed(1)}%; time-scaling to fit`,
+      );
+    } else {
+      narrationFilter = '[1:a]';
+    }
+
+    // Complex filter: time-scale narration if needed, lower music volume,
+    // then mix them together
+    const complexFilter = audioDuration > videoDuration && videoDuration > 0
+      ? `[1:a]${atempoChain(audioDuration / videoDuration)}[narr];[2:a]volume=0.12[music];[narr][music]amix=inputs=2:duration=shortest:dropout_transition=2[aout]`
+      : `[1:a]anull[narr];[2:a]volume=0.12[music];[narr][music]amix=inputs=2:duration=shortest:dropout_transition=2[aout]`;
+
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(videoPath)
+        .input(audioPath)
+        .input(backgroundMusicPath)
+        .complexFilter(complexFilter)
+        .outputOptions([
+          '-c:v copy',
+          '-c:a aac',
+          '-map 0:v:0',
+          '-map [aout]',
+          '-shortest',
+        ])
+        .output(outputPath)
+        .on('start', (cmd) => console.log(`[ffmpeg] ${cmd}`))
+        .on('end', () => {
+          console.log(`[ffmpeg] Muxed output (with music) saved: ${outputPath}`);
+          resolve(outputPath);
+        })
+        .on('error', (err: Error) =>
+          reject(new Error(`FFmpeg mux failed: ${err.message}`)),
+        )
+        .run();
+    });
+  }
+
+  // Original path: no background music
   const audioFilters: string[] = [];
   if (audioDuration > videoDuration && videoDuration > 0) {
     const ratio = audioDuration / videoDuration;

@@ -14,6 +14,7 @@ type ClipStatus =
   | "preparing_script"
   | "generating_video"
   | "generating_audio"
+  | "generating_music"
   | "muxing"
   | "complete"
   | "error";
@@ -30,6 +31,7 @@ const STEPS: { key: ClipStatus; label: string; icon: string }[] = [
   { key: "preparing_script", label: "Writing Story", icon: "📝" },
   { key: "generating_video", label: "Generating Scenes", icon: "🎬" },
   { key: "generating_audio", label: "Recording Narration", icon: "🎙️" },
+  { key: "generating_music", label: "Generating Music", icon: "🎵" },
   { key: "muxing", label: "Combining", icon: "🔗" },
   { key: "complete", label: "Complete", icon: "✅" },
 ];
@@ -57,16 +59,17 @@ function calcProgress(
   currentSegment?: number,
   totalSegments?: number,
 ): number {
-  // Each of the 5 steps is worth 20% of the bar
+  // Each of the 6 steps is worth ~16.7% of the bar
   const stepIndex = ORDER[status] ?? 0;
-  const baseProgress = stepIndex * 20;
+  const stepWidth = 100 / STEPS.length;
+  const baseProgress = stepIndex * stepWidth;
 
   if (status === "complete") return 100;
 
   if (status === "generating_video" && currentSegment && totalSegments) {
     // Sub-progress within the video generation step
     const segFraction = (currentSegment - 1) / totalSegments;
-    return baseProgress + segFraction * 20;
+    return baseProgress + segFraction * stepWidth;
   }
 
   return baseProgress + 2; // small offset so the bar is visible on step entry
