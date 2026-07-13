@@ -59,6 +59,17 @@
   margin-top: 0.5rem;
 }
 
+/* Character voice section */
+.characterSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: var(--color-background-surface, rgba(255,255,255,0.04));
+  border: 1px solid var(--color-border-default, rgba(255,255,255,0.08));
+}
+
 /* Full-width status bar spanning all columns */
 .statusBar {
   grid-column: 1 / -1;
@@ -79,6 +90,33 @@
   text-align: center;
   padding: 12px 32px;
   text-decoration: none;
+}
+
+/* TikTok caption box */
+.captionBox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: var(--color-background-surface, rgba(255,255,255,0.04));
+  border: 1px solid var(--color-border-default, rgba(255,255,255,0.08));
+}
+
+.captionLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary, #888);
+}
+
+.captionText {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--color-text-primary, #eee);
+  user-select: all;
 }
 
 /* ── Responsive: collapse to 2-col then 1-col ───────────────────── */
