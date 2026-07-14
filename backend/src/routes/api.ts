@@ -15,7 +15,7 @@ import {
   subscribeToClip,
 } from '../store.js';
 import { generateVideo, VideoFilteredError } from '../services/veo.service.js';
-import { generateStory, generateCharacterProfile, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
+import { generateStory, generateCharacterProfile, generateMusicPrompt, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
 import {
   generateVoiceover,
   getAvailableVoices,
@@ -126,6 +126,22 @@ apiRouter.post('/suggest-character', async (req: Request, res: Response) => {
   }
 });
 
+// Suggest a music prompt based on the pasted source text
+apiRouter.post('/suggest-music-prompt', async (req: Request, res: Response) => {
+  const { storyText } = req.body;
+  if (!storyText || typeof storyText !== 'string' || !storyText.trim()) {
+    res.status(400).json({ error: 'storyText is required' });
+    return;
+  }
+  try {
+    const musicPrompt = await generateMusicPrompt(storyText);
+    res.json({ musicPrompt });
+  } catch (err) {
+    console.error('[api] Music prompt suggestion failed:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // Create a new clip (multipart: image files + text fields)
 apiRouter.post(
   '/clips',
@@ -224,10 +240,13 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
     return;
   }
 
-  // If the user sent an edited narrationScript, store it before launching
-  const { narrationScript: narrationOverride } = req.body ?? {};
+  // If the user sent an edited narrationScript or musicPrompt, store them before launching
+  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride } = req.body ?? {};
   if (narrationOverride && typeof narrationOverride === 'string') {
     updateClip(clip.id, { narrationScript: narrationOverride });
+  }
+  if (musicPromptOverride && typeof musicPromptOverride === 'string') {
+    updateClip(clip.id, { musicPrompt: musicPromptOverride });
   }
 
   // Return immediately
@@ -510,9 +529,12 @@ async function runPipeline(clipId: string): Promise<void> {
       updateClip(clipId, { status: 'generating_music' });
       console.log(`[pipeline] Generating background music for clip ${clipId}`);
 
+      // Re-fetch clip to pick up any user-edited music prompt
+      const clipForMusic = getClip(clipId)!;
       const videoDuration = segmentCount * SEGMENT_DURATION;
       backgroundMusicPath = await generateBackgroundMusic({
         narrationScript: story.narrationScript,
+        musicPrompt: clipForMusic.musicPrompt,
         videoDuration,
         outputDir,
         clipId,
