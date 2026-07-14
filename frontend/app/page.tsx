@@ -35,6 +35,8 @@ interface Clip {
   totalSegments?: number;
   finalPath?: string;
   videoPath?: string;
+  enableNarration?: boolean;
+  enableMusic?: boolean;
 }
 
 export default function CreatePage() {
@@ -284,6 +286,8 @@ export default function CreatePage() {
                 error={clip.error}
                 currentSegment={clip.currentSegment}
                 totalSegments={clip.totalSegments}
+                enableNarration={clip.enableNarration}
+                enableMusic={clip.enableMusic}
                 onRetry={handleRetry}
               />
             </div>
