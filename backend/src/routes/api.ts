@@ -463,9 +463,7 @@ async function runPipeline(clipId: string): Promise<void> {
       ' The entire background MUST be a solid, uniform bright green chroma key screen (#00FF00). ' +
       'No other background elements, scenery, or environments — only a flat green screen behind the subject.';
     for (let i = 0; i < story.scenes.length; i++) {
-      if (!story.scenes[i].prompt.toLowerCase().includes('green')) {
-        story.scenes[i].prompt += GREEN_SCREEN_SUFFIX;
-      }
+      story.scenes[i].prompt += GREEN_SCREEN_SUFFIX;
     }
 
     const segmentPaths: string[] = [];
