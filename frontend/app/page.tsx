@@ -415,12 +415,13 @@ export default function CreatePage() {
               </div>
             )}
 
-            {clip?.status === "script_ready" && (
+            {editedNarration && (
               <div className={styles.scriptPreview}>
                 <label>Narration Script</label>
                 <textarea
                   value={editedNarration}
                   onChange={(e) => setEditedNarration(e.target.value)}
+                  readOnly={clip?.status !== "script_ready"}
                 />
               </div>
             )}
