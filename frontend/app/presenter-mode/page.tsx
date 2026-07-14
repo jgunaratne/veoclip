@@ -38,6 +38,20 @@ interface Clip {
   mode?: "story" | "presenter";
 }
 
+async function getErrorMessage(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    return data.error || `Request failed with status ${res.status}`;
+  } catch {
+    try {
+      const text = await res.text();
+      return text || `Request failed with status ${res.status}`;
+    } catch {
+      return `Request failed with status ${res.status}`;
+    }
+  }
+}
+
 export default function PresenterModePage() {
   // Form state
   const [faceFile, setFaceFile] = useState<File | null>(null);
@@ -101,8 +115,8 @@ export default function PresenterModePage() {
       });
 
       if (!createRes.ok) {
-        const err = await createRes.json();
-        throw new Error(err.error || "Failed to create clip");
+        const errorMsg = await getErrorMessage(createRes);
+        throw new Error(errorMsg);
       }
 
       const newClip: Clip = await createRes.json();
@@ -113,8 +127,8 @@ export default function PresenterModePage() {
       });
 
       if (!scriptRes.ok) {
-        const err = await scriptRes.json();
-        throw new Error(err.error || "Failed to generate script");
+        const errorMsg = await getErrorMessage(scriptRes);
+        throw new Error(errorMsg);
       }
 
       const updatedClip: Clip = await scriptRes.json();
@@ -143,8 +157,8 @@ export default function PresenterModePage() {
       });
 
       if (!genRes.ok) {
-        const err = await genRes.json();
-        throw new Error(err.error || "Failed to start generation");
+        const errorMsg = await getErrorMessage(genRes);
+        throw new Error(errorMsg);
       }
 
       setClip((prev) => prev ? { ...prev, status: "generating_video" } : prev);

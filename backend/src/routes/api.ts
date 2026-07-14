@@ -147,44 +147,50 @@ apiRouter.post(
   '/clips',
   upload.array('images', MAX_IMAGES),
   async (req: Request, res: Response) => {
-    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    try {
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-    const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode } = req.body;
 
-    if (!storyText || !storyText.trim()) {
-      res.status(400).json({ error: 'storyText is required' });
-      return;
+      if (!storyText || !storyText.trim()) {
+        res.status(400).json({ error: 'storyText is required' });
+        return;
+      }
+
+      const parsedLength = Number(length) as StoryLength;
+      if (!SEGMENT_COUNTS[parsedLength]) {
+        res.status(400).json({ error: 'length must be 30, 60 or 180' });
+        return;
+      }
+
+      // Convert any non-JPEG/PNG uploads (AVIF, WEBP, HEIC, etc.) to JPEG
+      const imagePaths = await Promise.all(
+        files.map((f) => ensureJpeg(f.path)),
+      );
+
+      const clip: Clip = {
+        id: uuidv4(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        storyText,
+        referenceImagePaths: imagePaths,
+        speakerVoice: speakerVoice || getDefaultVoice(),
+        characterProfile: characterProfile?.trim() || undefined,
+        enableMusic: enableMusic === 'true' || enableMusic === true,
+        enableNarration: enableNarration !== 'false' && enableNarration !== false,
+        length: parsedLength,
+        ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
+        mode: mode === 'presenter' ? 'presenter' : 'story',
+        status: 'idle',
+      };
+
+      setClip(clip);
+      res.status(201).json(clip);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[api] Failed to create clip:', message);
+      res.status(500).json({ error: message });
     }
-
-    const parsedLength = Number(length) as StoryLength;
-    if (!SEGMENT_COUNTS[parsedLength]) {
-      res.status(400).json({ error: 'length must be 30, 60 or 180' });
-      return;
-    }
-
-    // Convert any non-JPEG/PNG uploads (AVIF, WEBP, HEIC, etc.) to JPEG
-    const imagePaths = await Promise.all(
-      files.map((f) => ensureJpeg(f.path)),
-    );
-
-    const clip: Clip = {
-      id: uuidv4(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      storyText,
-      referenceImagePaths: imagePaths,
-      speakerVoice: speakerVoice || getDefaultVoice(),
-      characterProfile: characterProfile?.trim() || undefined,
-      enableMusic: enableMusic === 'true' || enableMusic === true,
-      enableNarration: enableNarration !== 'false' && enableNarration !== false,
-      length: parsedLength,
-      ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
-      mode: mode === 'presenter' ? 'presenter' : 'story',
-      status: 'idle',
-    };
-
-    setClip(clip);
-    res.status(201).json(clip);
   },
 );
 
