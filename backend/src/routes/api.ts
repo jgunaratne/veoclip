@@ -430,6 +430,16 @@ async function runPipeline(clipId: string): Promise<void> {
       console.log(`[pipeline] Presenter mode: embedded narration into ${segmentCount} scene prompt(s)`);
     }
 
+    // Ensure ALL clips are generated on a green screen background
+    const GREEN_SCREEN_SUFFIX =
+      ' The entire background MUST be a solid, uniform bright green chroma key screen (#00FF00). ' +
+      'No other background elements, scenery, or environments — only a flat green screen behind the subject.';
+    for (let i = 0; i < story.scenes.length; i++) {
+      if (!story.scenes[i].prompt.toLowerCase().includes('green')) {
+        story.scenes[i].prompt += GREEN_SCREEN_SUFFIX;
+      }
+    }
+
     const segmentPaths: string[] = [];
     const useContinuity = clip.ensureContinuity || clip.mode === 'presenter';
 

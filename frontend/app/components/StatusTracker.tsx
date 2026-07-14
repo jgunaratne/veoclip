@@ -142,6 +142,8 @@ export default function StatusTracker({
   const visibleSteps = STEPS.filter((step) => {
     if (step.key === "generating_audio" && enableNarration === false) return false;
     if (step.key === "generating_music" && enableMusic === false) return false;
+    // Hide muxing when there's nothing to combine (no narration + no music)
+    if (step.key === "muxing" && enableNarration === false && enableMusic === false) return false;
     return true;
   });
 
