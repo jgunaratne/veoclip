@@ -119,6 +119,30 @@
   user-select: all;
 }
 
+/* Script preview textarea */
+.scriptPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scriptPreview label {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.scriptPreview textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 /* ── Responsive: collapse to 2-col then 1-col ───────────────────── */
 @media (max-width: 1100px) {
   .grid {

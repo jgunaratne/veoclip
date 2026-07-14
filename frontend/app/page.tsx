@@ -17,6 +17,7 @@ type ClipStatus =
   | "idle"
   | "uploading"
   | "preparing_script"
+  | "script_ready"
   | "generating_video"
   | "generating_audio"
   | "generating_music"
@@ -79,6 +80,7 @@ export default function CreatePage() {
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editedNarration, setEditedNarration] = useState("");
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Clean up SSE on unmount
@@ -110,7 +112,7 @@ export default function CreatePage() {
     }, 3000);
   }, []);
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerateScript = useCallback(async () => {
     if (!storyText.trim()) return;
     setIsSubmitting(true);
 
@@ -140,12 +142,47 @@ export default function CreatePage() {
       }
 
       const newClip: Clip = await createRes.json();
-      // Show generating status immediately
+      // Show preparing status immediately
       setClip({ ...newClip, status: "preparing_script" });
 
-      // 2. Start generation
-      const genRes = await fetch(`/api/clips/${newClip.id}/generate`, {
+      // 2. Generate script only
+      const scriptRes = await fetch(`/api/clips/${newClip.id}/script`, {
         method: "POST",
+      });
+
+      if (!scriptRes.ok) {
+        const err = await scriptRes.json();
+        throw new Error(err.error || "Failed to generate script");
+      }
+
+      const updatedClip: Clip = await scriptRes.json();
+      setClip(updatedClip);
+      setEditedNarration(updatedClip.narrationScript ?? "");
+    } catch (err) {
+      setClip((prev) =>
+        prev
+          ? { ...prev, status: "error", error: (err as Error).message }
+          : {
+              id: "",
+              status: "error",
+              error: (err as Error).message,
+            },
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [files, storyText, voice, length, ensureContinuity, enableMusic, useCustomVoice, characterProfile]);
+
+  const handleGenerateVideo = useCallback(async () => {
+    if (!clip || clip.status !== "script_ready") return;
+    setIsSubmitting(true);
+
+    try {
+      // 1. Start generation with the (possibly edited) narration
+      const genRes = await fetch(`/api/clips/${clip.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ narrationScript: editedNarration }),
       });
 
       if (!genRes.ok) {
@@ -153,10 +190,12 @@ export default function CreatePage() {
         throw new Error(err.error || "Failed to start generation");
       }
 
-      // 3. Open SSE directly to backend (bypass Next.js proxy which buffers SSE)
+      setClip((prev) => prev ? { ...prev, status: "generating_video" } : prev);
+
+      // 2. Open SSE directly to backend (bypass Next.js proxy which buffers SSE)
       eventSourceRef.current?.close();
       const es = new EventSource(
-        `http://localhost:8080/api/clips/${newClip.id}/events`,
+        `http://localhost:8080/api/clips/${clip.id}/events`,
       );
       eventSourceRef.current = es;
 
@@ -177,7 +216,7 @@ export default function CreatePage() {
       es.onerror = () => {
         // SSE failed — fall back to polling
         es.close();
-        startPolling(newClip.id);
+        startPolling(clip.id);
       };
     } catch (err) {
       setClip((prev) =>
@@ -192,20 +231,25 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [files, storyText, voice, length, ensureContinuity, enableMusic, useCustomVoice, characterProfile, startPolling]);
+  }, [clip, editedNarration, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
     setClip(null);
-    handleGenerate();
-  }, [clip, handleGenerate]);
+    setEditedNarration("");
+    handleGenerateScript();
+  }, [clip, handleGenerateScript]);
 
   const isGenerating =
     clip &&
     clip.status !== "idle" &&
+    clip.status !== "script_ready" &&
     clip.status !== "complete" &&
     clip.status !== "error";
-  const canGenerate = storyText.trim() && !isSubmitting && !isGenerating;
+  const canGenerateScript =
+    !!storyText.trim() && !isSubmitting && !isGenerating && clip?.status !== "script_ready";
+  const canGenerateVideo =
+    clip?.status === "script_ready" && !isSubmitting && !isGenerating;
 
   // Determine final video URL
   const finalVideoUrl = clip?.finalPath
@@ -303,19 +347,39 @@ export default function CreatePage() {
               onChange={(checked) => setEnableMusic(checked)}
             />
 
-            <Button
-              variant="primary"
-              size="lg"
-              label={
-                isSubmitting
-                  ? "Submitting…"
-                  : isGenerating
-                    ? "⏳ Generating…"
-                    : "✨ Generate Story Video"
-              }
-              isDisabled={!canGenerate}
-              clickAction={handleGenerate}
-            />
+            {clip?.status === "script_ready" && (
+              <div className={styles.scriptPreview}>
+                <label>Narration Script</label>
+                <textarea
+                  value={editedNarration}
+                  onChange={(e) => setEditedNarration(e.target.value)}
+                />
+              </div>
+            )}
+
+            {clip?.status === "script_ready" ? (
+              <Button
+                variant="primary"
+                size="lg"
+                label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
+                isDisabled={!canGenerateVideo}
+                clickAction={handleGenerateVideo}
+              />
+            ) : (
+              <Button
+                variant="primary"
+                size="lg"
+                label={
+                  isSubmitting
+                    ? "Submitting…"
+                    : isGenerating
+                      ? "⏳ Generating…"
+                      : "✨ Generate Script"
+                }
+                isDisabled={!canGenerateScript}
+                clickAction={handleGenerateScript}
+              />
+            )}
 
             {/* Inline error banner */}
             {clip?.status === "error" && clip.error && (
