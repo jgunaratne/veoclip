@@ -499,7 +499,7 @@ async function runPipeline(clipId: string): Promise<void> {
           );
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
-            prompt: SAFE_FALLBACK_SCENE,
+            prompt: SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
@@ -552,7 +552,7 @@ async function runPipeline(clipId: string): Promise<void> {
             );
             segVideoPath = await generateVideo({
               imagePath: seedImagePath,
-              prompt: SAFE_FALLBACK_SCENE,
+              prompt: SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
