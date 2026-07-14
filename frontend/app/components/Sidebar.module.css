@@ -1,0 +1,117 @@
+.hamburger {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 1001;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--color-text, #333);
+  transition: background 0.2s;
+}
+
+.hamburger:hover {
+  background: var(--color-surface-hover, rgba(0,0,0,0.06));
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.backdropVisible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  background: var(--color-surface, #fff);
+  z-index: 1000;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+.sidebarOpen {
+  transform: translateX(0);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid var(--color-border, #e5e5e5);
+}
+
+.brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--color-text-secondary, #666);
+  transition: background 0.2s;
+}
+
+.close:hover {
+  background: var(--color-surface-hover, rgba(0,0,0,0.06));
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0;
+  gap: 2px;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  text-decoration: none;
+  color: var(--color-text, #333);
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-radius: 0;
+  transition: background 0.15s;
+}
+
+.navLink:hover {
+  background: var(--color-surface-hover, rgba(0,0,0,0.04));
+}
+
+.navLinkActive {
+  background: var(--color-accent-subtle, rgba(59, 130, 246, 0.08));
+  color: var(--color-accent, #3b82f6);
+  font-weight: 600;
+}
+
+.navIcon {
+  font-size: 1.2rem;
+}
