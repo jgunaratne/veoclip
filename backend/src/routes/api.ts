@@ -133,7 +133,7 @@ apiRouter.post(
   async (req: Request, res: Response) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-    const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic } = req.body;
+    const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration } = req.body;
 
     if (!storyText || !storyText.trim()) {
       res.status(400).json({ error: 'storyText is required' });
@@ -160,6 +160,7 @@ apiRouter.post(
       speakerVoice: speakerVoice || getDefaultVoice(),
       characterProfile: characterProfile?.trim() || undefined,
       enableMusic: enableMusic === 'true' || enableMusic === true,
+      enableNarration: enableNarration !== 'false' && enableNarration !== false,
       length: parsedLength,
       ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
       status: 'idle',
@@ -479,29 +480,35 @@ async function runPipeline(clipId: string): Promise<void> {
       videoPath = segmentPaths[0];
     }
 
-    updateClip(clipId, {
-      videoPath,
-      status: 'generating_audio',
-      currentSegment: undefined,
-    });
-    console.log(`[pipeline] Video done, generating narration audio for clip ${clipId}`);
+    let audioPath: string | undefined = undefined;
+    const narrationEnabled = clip.enableNarration !== false;
 
-    // ── Step 3: Narration voiceover ────────────────────────────────────
-    const audioPath = await generateVoiceover({
-      script: story.narrationScript,
-      voice: clip.speakerVoice,
-      characterProfile: clip.characterProfile,
-      outputDir,
-      clipId,
-    });
+    if (narrationEnabled) {
+      updateClip(clipId, {
+        status: 'generating_audio',
+        currentSegment: undefined,
+      });
+      console.log(`[pipeline] Video done, generating narration audio for clip ${clipId}`);
 
-    updateClip(clipId, { audioPath });
+      // ── Step 3: Narration voiceover ────────────────────────────────────
+      audioPath = await generateVoiceover({
+        script: story.narrationScript,
+        voice: clip.speakerVoice,
+        characterProfile: clip.characterProfile,
+        outputDir,
+        clipId,
+      });
+
+      updateClip(clipId, { audioPath });
+    } else {
+      console.log(`[pipeline] Video done, voiceover narration is disabled for clip ${clipId}`);
+    }
 
     // ── Step 4: Background music (best-effort) ────────────────────────
     let backgroundMusicPath: string | null = null;
     if (clip.enableMusic) {
       updateClip(clipId, { status: 'generating_music' });
-      console.log(`[pipeline] Narration done, generating background music for clip ${clipId}`);
+      console.log(`[pipeline] Generating background music for clip ${clipId}`);
 
       const videoDuration = segmentCount * SEGMENT_DURATION;
       backgroundMusicPath = await generateBackgroundMusic({
@@ -517,7 +524,7 @@ async function runPipeline(clipId: string): Promise<void> {
 
     // ── Step 5: Mux video + narration + music ─────────────────────────
     updateClip(clipId, { status: 'muxing' });
-    console.log(`[pipeline] Audio done, muxing for clip ${clipId}${backgroundMusicPath ? ' (with background music)' : ''}`);
+    console.log(`[pipeline] Muxing for clip ${clipId}${backgroundMusicPath ? ' (with background music)' : ''}`);
 
     const finalPath = await muxVideoAudio({
       videoPath,

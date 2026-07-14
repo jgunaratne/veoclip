@@ -18,6 +18,23 @@ function getMediaDuration(mediaPath: string): Promise<number> {
 }
 
 /**
+ * Check if a media file has an audio track.
+ */
+function hasAudioStream(mediaPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(mediaPath, (err, metadata) => {
+      if (err) {
+        resolve(false);
+        return;
+      }
+      const streams = metadata.streams ?? [];
+      const hasAudio = streams.some((s) => s.codec_type === 'audio');
+      resolve(hasAudio);
+    });
+  });
+}
+
+/**
  * Build an atempo filter for the given speed-up ratio. A single atempo is
  * limited to [0.5, 2.0], so larger ratios are chained.
  */
@@ -40,7 +57,7 @@ function atempoChain(ratio: number): string {
  */
 export async function muxVideoAudio(opts: {
   videoPath: string;
-  audioPath: string;
+  audioPath?: string;
   backgroundMusicPath?: string;
   outputDir: string;
   clipId: string;
@@ -48,6 +65,70 @@ export async function muxVideoAudio(opts: {
   const { videoPath, audioPath, backgroundMusicPath, outputDir, clipId } = opts;
   const outputPath = path.join(outputDir, `${clipId}_final.mp4`);
 
+  // Handle case where voiceover narration is disabled
+  if (!audioPath) {
+    if (backgroundMusicPath) {
+      const hasVideoAudio = await hasAudioStream(videoPath);
+      console.log(`[ffmpeg] Muxing video (hasAudio=${hasVideoAudio}) + background music (no narration)`);
+
+      return new Promise((resolve, reject) => {
+        const cmd = ffmpeg().input(videoPath).input(backgroundMusicPath);
+
+        if (hasVideoAudio) {
+          // Mix video's original audio with music
+          cmd
+            .complexFilter('[0:a:0]volume=1.0[v_audio];[1:a:0]volume=0.12[music];[v_audio][music]amix=inputs=2:duration=first[aout]')
+            .outputOptions([
+              '-c:v copy',
+              '-c:a aac',
+              '-map 0:v:0',
+              '-map [aout]',
+            ]);
+        } else {
+          // No audio on video, just map background music directly
+          cmd.outputOptions([
+            '-c:v copy',
+            '-c:a aac',
+            '-map 0:v:0',
+            '-map 1:a:0',
+            '-shortest',
+          ]);
+        }
+
+        cmd
+          .output(outputPath)
+          .on('start', (c) => console.log(`[ffmpeg] ${c}`))
+          .on('end', () => {
+            console.log(`[ffmpeg] Muxed video (music only) saved: ${outputPath}`);
+            resolve(outputPath);
+          })
+          .on('error', (err: Error) =>
+            reject(new Error(`FFmpeg mux failed: ${err.message}`)),
+          )
+          .run();
+      });
+    }
+
+    // No voiceover, no background music — output is just the raw video file
+    console.log(`[ffmpeg] Narration and music disabled, copying raw video directly`);
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(videoPath)
+        .outputOptions(['-c copy'])
+        .output(outputPath)
+        .on('start', (c) => console.log(`[ffmpeg] ${c}`))
+        .on('end', () => {
+          console.log(`[ffmpeg] Saved final raw video copy: ${outputPath}`);
+          resolve(outputPath);
+        })
+        .on('error', (err: Error) =>
+          reject(new Error(`FFmpeg copy failed: ${err.message}`)),
+        )
+        .run();
+    });
+  }
+
+  // Voiceover narration IS enabled — run original muxing logic
   const [videoDuration, audioDuration] = await Promise.all([
     getMediaDuration(videoPath),
     getMediaDuration(audioPath),
@@ -57,18 +138,6 @@ export async function muxVideoAudio(opts: {
   // complex filter. Music is at ~12% volume (-18dB) so it doesn't overpower
   // the narration.
   if (backgroundMusicPath) {
-    // Build atempo filter string for narration if it overruns the video
-    let narrationFilter = '[1:a]';
-    if (audioDuration > videoDuration && videoDuration > 0) {
-      const ratio = audioDuration / videoDuration;
-      narrationFilter = `[1:a]${atempoChain(ratio)}[narr];[narr]`;
-      console.log(
-        `[ffmpeg] Narration overran video by ${((ratio - 1) * 100).toFixed(1)}%; time-scaling to fit`,
-      );
-    } else {
-      narrationFilter = '[1:a]';
-    }
-
     // Complex filter: time-scale narration if needed, lower music volume,
     // then mix them together
     const complexFilter = audioDuration > videoDuration && videoDuration > 0

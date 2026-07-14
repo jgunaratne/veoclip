@@ -12,6 +12,7 @@ type ClipStatus =
   | "idle"
   | "uploading"
   | "preparing_script"
+  | "script_ready"
   | "generating_video"
   | "generating_audio"
   | "generating_music"
@@ -36,8 +37,15 @@ const STEPS: { key: ClipStatus; label: string; icon: string }[] = [
   { key: "complete", label: "Complete", icon: "✅" },
 ];
 
-const ORDER: Record<string, number> = {};
-STEPS.forEach((s, i) => (ORDER[s.key] = i));
+const ORDER: Record<string, number> = {
+  preparing_script: 0,
+  script_ready: 1, // Treating script_ready as having completed Step 0
+  generating_video: 1,
+  generating_audio: 2,
+  generating_music: 3,
+  muxing: 4,
+  complete: 5,
+};
 
 function stepState(
   stepKey: ClipStatus,
