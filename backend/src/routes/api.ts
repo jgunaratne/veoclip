@@ -404,12 +404,30 @@ async function runPipeline(clipId: string): Promise<void> {
     );
 
     // For presenter mode, use the single face image for ALL segments
+    // and embed narration text into each scene prompt
     if (clip.mode === 'presenter' && clip.referenceImagePaths.length > 0) {
       seedAssignments.clear();
       const faceImage = clip.referenceImagePaths[0];
       for (let i = 0; i < segmentCount; i++) {
         seedAssignments.set(i, faceImage);
       }
+    }
+
+    if (clip.mode === 'presenter') {
+      // Split narration into segments and embed into Veo prompts
+      const sentences = story.narrationScript.match(/[^.!?]+[.!?]+/g) || [story.narrationScript];
+      const perSegment = Math.ceil(sentences.length / segmentCount);
+      for (let i = 0; i < Math.min(story.scenes.length, segmentCount); i++) {
+        const segText = sentences.slice(i * perSegment, (i + 1) * perSegment).join(' ').trim();
+        story.scenes[i] = {
+          prompt:
+            'A person speaking naturally and directly to camera against a solid bright green ' +
+            'chroma key screen background. Professional studio lighting. The person talks with ' +
+            'subtle natural expressions and gestures, maintaining eye contact with the viewer. ' +
+            `The person says out loud: "${segText}"`,
+        };
+      }
+      console.log(`[pipeline] Presenter mode: embedded narration into ${segmentCount} scene prompt(s)`);
     }
 
     const segmentPaths: string[] = [];
@@ -532,6 +550,14 @@ async function runPipeline(clipId: string): Promise<void> {
 
     // Save videoPath on the clip and clear segment counter
     updateClip(clipId, { videoPath, currentSegment: undefined });
+
+    // For presenter mode, the Veo video already contains speech — skip TTS/music/mux
+    if (clip.mode === 'presenter') {
+      console.log(`[pipeline] Presenter mode: skipping TTS/music, using Veo output directly`);
+      updateClip(clipId, { finalPath: videoPath, status: 'complete' });
+      console.log(`[pipeline] Clip ${clipId} complete!`);
+      return;
+    }
 
     let audioPath: string | undefined = undefined;
     const narrationEnabled = clip.enableNarration !== false;
