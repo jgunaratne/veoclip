@@ -277,7 +277,7 @@ export default function CreatePage() {
 
         <div className={styles.grid}>
           {/* Full-width status bar — spans all 3 columns */}
-          {clip && clip.status !== "idle" && (
+          {clip && clip.status !== "idle" && clip.status !== "script_ready" && (
             <div className={styles.statusBar}>
               <StatusTracker
                 status={clip.status}

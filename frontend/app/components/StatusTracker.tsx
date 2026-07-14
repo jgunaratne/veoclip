@@ -39,7 +39,7 @@ const STEPS: { key: ClipStatus; label: string; icon: string }[] = [
 
 const ORDER: Record<string, number> = {
   preparing_script: 0,
-  script_ready: 1, // Treating script_ready as having completed Step 0
+  script_ready: 0.5, // Script done, but video not started yet
   generating_video: 1,
   generating_audio: 2,
   generating_music: 3,
