@@ -480,14 +480,14 @@ async function runPipeline(clipId: string): Promise<void> {
       videoPath = segmentPaths[0];
     }
 
+    // Save videoPath on the clip and clear segment counter
+    updateClip(clipId, { videoPath, currentSegment: undefined });
+
     let audioPath: string | undefined = undefined;
     const narrationEnabled = clip.enableNarration !== false;
 
     if (narrationEnabled) {
-      updateClip(clipId, {
-        status: 'generating_audio',
-        currentSegment: undefined,
-      });
+      updateClip(clipId, { status: 'generating_audio' });
       console.log(`[pipeline] Video done, generating narration audio for clip ${clipId}`);
 
       // ── Step 3: Narration voiceover ────────────────────────────────────
