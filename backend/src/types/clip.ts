@@ -36,6 +36,7 @@ export interface Clip {
   enableNarration?: boolean; // enable voiceover narration
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
+  mode?: 'story' | 'presenter';
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;

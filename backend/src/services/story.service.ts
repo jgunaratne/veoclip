@@ -229,6 +229,161 @@ Return ONLY valid JSON (no markdown fences) with this structure:
   return script;
 }
 
+/**
+ * Generate ONLY a narration script for presenter mode (talking-head video).
+ * No scene prompts are produced — the caller constructs a uniform presenter
+ * prompt for every segment.
+ */
+export async function generatePresenterScript(opts: {
+  storyText: string;
+  targetSeconds: number;
+}): Promise<{ narrationScript: string; caption?: string }> {
+  const { storyText, targetSeconds } = opts;
+
+  // ~2.5 words per second for a conversational pace
+  const narrationWords = Math.floor(targetSeconds * 2.5);
+
+  const prompt = `You are writing a presenter narration script for a ${targetSeconds}-second talking-head video. A single person will speak directly to the camera.
+
+Given the source text below, create:
+
+1. A narration script of AT MOST ${narrationWords} words, paced to finish within \
+${targetSeconds} seconds of natural speech. It should be:
+- Engaging and conversational, as if the presenter is speaking directly to the viewer
+- Informative and accurate, drawn from the source text
+- Natural-sounding — avoid stiff or overly formal language
+- CRITICAL: The narration will be read aloud by a text-to-speech model with strict content filters. \
+The script MUST NOT mention: alcohol, alcoholism, drugs, drinking, drunkenness, guns, firearms, weapons, \
+violence, aggression, injuries, death, crime, theft, sexual content, or any dangerous/harmful activities. \
+If the source text covers these topics, either omit them entirely or reframe them in a safe, positive way.
+
+2. A TikTok/social media caption (max 300 characters including hashtags). It should be attention-grabbing, \
+informative, and include 3-5 relevant hashtags. Do NOT use generic hashtags like #fyp or #viral — use \
+topic-specific ones drawn from the content.
+
+Source text:
+${storyText.slice(0, 6000)}
+
+Return ONLY valid JSON (no markdown fences) with this structure:
+{
+  "narrationScript": "The full narration text...",
+  "caption": "Your TikTok caption with #hashtags"
+}`;
+
+  const model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
+  const { url, headers } = await getGenerateContentEndpoint(model);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            narrationScript: { type: 'STRING' },
+            caption: { type: 'STRING' },
+          },
+          required: ['narrationScript', 'caption'],
+        },
+        temperature: 0.7,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Presenter script generation failed: ${response.status} ${errorText.slice(0, 300)}`,
+    );
+  }
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const json = (await response.json()) as Record<string, any>;
+  const finishReason = json?.candidates?.[0]?.finishReason;
+  const responseParts: any[] =
+    json?.candidates?.[0]?.content?.parts ?? [];
+
+  console.log(`[story] Presenter response finishReason=${finishReason}, parts=${responseParts.length}`);
+
+  // Check for safety block or empty response
+  if (finishReason === 'SAFETY' || responseParts.length === 0) {
+    throw new Error(`Presenter script generation blocked (finishReason=${finishReason}). The source text may contain content that triggers safety filters.`);
+  }
+
+  // Filter out thought parts and join output text
+  const outputParts = responseParts.filter((p) => !p?.thought);
+  let text = outputParts
+    .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+    .join('')
+    .trim();
+
+  if (!text) {
+    console.warn('[story] Presenter: all parts were thought parts or empty — joining all parts as fallback');
+    text = responseParts
+      .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+      .join('')
+      .trim();
+  }
+
+  // Strip code fences
+  if (text.startsWith('```')) {
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  }
+
+  console.log(`[story] Presenter text (${text.length} chars): ${text.slice(0, 300)}…`);
+
+  // Try multiple strategies to extract valid JSON
+  let result: { narrationScript: string; caption?: string } | null = null;
+
+  // Strategy 1: Direct parse
+  try {
+    result = JSON.parse(text) as { narrationScript: string; caption?: string };
+  } catch {
+    // Strategy 2: Extract JSON object via regex
+    const jsonMatch = text.match(/\{[\s\S]*"narrationScript"[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        result = JSON.parse(jsonMatch[0]) as { narrationScript: string; caption?: string };
+        console.log('[story] Presenter: extracted JSON via regex from mixed content');
+      } catch {
+        // Strategy 3: Try each non-thought part individually
+        for (const p of outputParts) {
+          if (typeof p?.text === 'string') {
+            let partText = p.text.trim();
+            if (partText.startsWith('```')) {
+              partText = partText.replace(/```json/g, '').replace(/```/g, '').trim();
+            }
+            try {
+              result = JSON.parse(partText) as { narrationScript: string; caption?: string };
+              console.log('[story] Presenter: parsed JSON from individual part');
+              break;
+            } catch {
+              continue;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!result) {
+    console.error(`[story] Presenter: all JSON parse strategies failed. Raw text: ${text.slice(0, 1000)}`);
+    throw new Error('Presenter script generation returned invalid JSON');
+  }
+
+  if (!result.narrationScript) {
+    throw new Error('Presenter script generation returned an incomplete script');
+  }
+
+  console.log(
+    `[story] Presenter script generated: ${result.narrationScript.slice(0, 100)}…`,
+  );
+  return result;
+}
+
 /** Deliberately safe fallback prompt for scenes rejected by the safety filter. */
 export const SAFE_FALLBACK_SCENE =
   'A slow cinematic camera drift through an abstract, softly lit landscape of ' +

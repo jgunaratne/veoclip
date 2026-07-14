@@ -15,7 +15,7 @@ import {
   subscribeToClip,
 } from '../store.js';
 import { generateVideo, VideoFilteredError } from '../services/veo.service.js';
-import { generateStory, generateCharacterProfile, generateMusicPrompt, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
+import { generateStory, generatePresenterScript, generateCharacterProfile, generateMusicPrompt, SAFE_FALLBACK_SCENE } from '../services/story.service.js';
 import {
   generateVoiceover,
   getAvailableVoices,
@@ -149,7 +149,7 @@ apiRouter.post(
   async (req: Request, res: Response) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-    const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration } = req.body;
+    const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode } = req.body;
 
     if (!storyText || !storyText.trim()) {
       res.status(400).json({ error: 'storyText is required' });
@@ -179,6 +179,7 @@ apiRouter.post(
       enableNarration: enableNarration !== 'false' && enableNarration !== false,
       length: parsedLength,
       ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
+      mode: mode === 'presenter' ? 'presenter' : 'story',
       status: 'idle',
     };
 
@@ -204,19 +205,40 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
     const segmentCount = SEGMENT_COUNTS[clip.length];
     updateClip(clip.id, { status: 'preparing_script' });
 
-    const story = await generateStory({
-      storyText: clip.storyText,
-      imagePaths: clip.referenceImagePaths,
-      targetSeconds: clip.length,
-      segmentCount,
-    });
+    if (clip.mode === 'presenter') {
+      // Presenter mode: generate narration only, use uniform talking-head prompt
+      const presenterResult = await generatePresenterScript({
+        storyText: clip.storyText,
+        targetSeconds: clip.length,
+      });
 
-    updateClip(clip.id, {
-      narrationScript: story.narrationScript,
-      scenePrompts: story.scenes.map((s) => s.prompt),
-      caption: story.caption || undefined,
-      status: 'script_ready',
-    });
+      const presenterPrompt =
+        'A person speaking naturally and directly to camera against a solid bright green ' +
+        'chroma key screen background. Professional studio lighting. The person talks with ' +
+        'subtle natural expressions and gestures, maintaining eye contact with the viewer.';
+
+      updateClip(clip.id, {
+        narrationScript: presenterResult.narrationScript,
+        scenePrompts: Array.from({ length: segmentCount }, () => presenterPrompt),
+        caption: presenterResult.caption || undefined,
+        status: 'script_ready',
+      });
+    } else {
+      // Story mode: generate narration + per-scene visual prompts
+      const story = await generateStory({
+        storyText: clip.storyText,
+        imagePaths: clip.referenceImagePaths,
+        targetSeconds: clip.length,
+        segmentCount,
+      });
+
+      updateClip(clip.id, {
+        narrationScript: story.narrationScript,
+        scenePrompts: story.scenes.map((s) => s.prompt),
+        caption: story.caption || undefined,
+        status: 'script_ready',
+      });
+    }
 
     res.json(getClip(clip.id));
   } catch (err) {
@@ -381,8 +403,17 @@ async function runPipeline(clipId: string): Promise<void> {
       segmentCount,
     );
 
+    // For presenter mode, use the single face image for ALL segments
+    if (clip.mode === 'presenter' && clip.referenceImagePaths.length > 0) {
+      seedAssignments.clear();
+      const faceImage = clip.referenceImagePaths[0];
+      for (let i = 0; i < segmentCount; i++) {
+        seedAssignments.set(i, faceImage);
+      }
+    }
+
     const segmentPaths: string[] = [];
-    const useContinuity = clip.ensureContinuity;
+    const useContinuity = clip.ensureContinuity || clip.mode === 'presenter';
 
     if (useContinuity) {
       console.log(`[pipeline] Generating segments sequentially with continuity chaining`);
