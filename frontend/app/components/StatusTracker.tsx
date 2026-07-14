@@ -25,6 +25,8 @@ interface StatusTrackerProps {
   error?: string;
   currentSegment?: number;
   totalSegments?: number;
+  enableNarration?: boolean;
+  enableMusic?: boolean;
   onRetry?: () => void;
 }
 
@@ -130,9 +132,18 @@ export default function StatusTracker({
   error,
   currentSegment,
   totalSegments,
+  enableNarration,
+  enableMusic,
   onRetry,
 }: StatusTrackerProps) {
   if (status === "idle") return null;
+
+  // Filter out steps for disabled features
+  const visibleSteps = STEPS.filter((step) => {
+    if (step.key === "generating_audio" && enableNarration === false) return false;
+    if (step.key === "generating_music" && enableMusic === false) return false;
+    return true;
+  });
 
   const progress = calcProgress(status, currentSegment, totalSegments);
   const elapsed = useElapsed(status);
@@ -177,7 +188,7 @@ export default function StatusTracker({
 
           {/* Step indicators */}
           <div className={styles.steps}>
-            {STEPS.map((step, i) => {
+            {visibleSteps.map((step, i) => {
               const state = stepState(step.key, status);
               return (
                 <div key={step.key} className={styles.stepGroup}>
