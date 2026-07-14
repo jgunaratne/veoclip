@@ -15,17 +15,19 @@ import { getAuthMode } from './google-auth.js';
  */
 export async function generateBackgroundMusic(opts: {
   narrationScript: string;
+  musicPrompt?: string; // user-editable prompt — if provided, used directly
   videoDuration: number; // seconds — used to loop/trim the clip
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  const { narrationScript, videoDuration, outputDir, clipId } = opts;
+  const { narrationScript, musicPrompt: userMusicPrompt, videoDuration, outputDir, clipId } = opts;
 
-  // Build a prompt for soft, atmospheric instrumental background music
-  const musicPrompt =
-    `Soft, atmospheric instrumental background music suitable for a documentary narration video. ` +
-    `No vocals, no lyrics. The mood should complement this narration: "${narrationScript.slice(0, 300)}…". ` +
-    `Gentle, ambient, cinematic underscore with minimal percussion.`;
+  // Use the user's music prompt if provided, otherwise build a default one
+  const musicPrompt = userMusicPrompt?.trim()
+    ? userMusicPrompt.trim()
+    : `Soft, atmospheric instrumental background music suitable for a documentary narration video. ` +
+      `No vocals, no lyrics. The mood should complement this narration: "${narrationScript.slice(0, 300)}…". ` +
+      `Gentle, ambient, cinematic underscore with minimal percussion.`;
 
   const mode = getAuthMode();
 

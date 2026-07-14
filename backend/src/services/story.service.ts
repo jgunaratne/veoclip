@@ -343,3 +343,92 @@ Respond with ONLY a JSON object: {"profile": "your persona description here"}`;
   console.log(`[story] Character profile last-resort cleanup (${cleaned.length} chars): ${cleaned.slice(0, 200)}…`);
   return cleaned || text;
 }
+
+// ---------------------------------------------------------------------------
+// Music prompt suggestion
+// ---------------------------------------------------------------------------
+
+/**
+ * Given the user's pasted source text, use Gemini to suggest a fitting
+ * music prompt — a short description of ideal background music.
+ */
+export async function generateMusicPrompt(storyText: string): Promise<string> {
+  const model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
+  const { url, headers } = await getGenerateContentEndpoint(model);
+
+  const prompt = `Based on the following story text, write a short (1-2 sentence) music prompt describing the ideal instrumental background music for a video narration. Focus on mood, tempo, instruments, and genre. No vocals or lyrics. Be specific and evocative.
+
+Source text (excerpt):
+${storyText.slice(0, 3000)}
+
+Respond with ONLY a JSON object: {"musicPrompt": "your music description here"}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.7,
+        maxOutputTokens: 1024,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Music prompt generation failed: ${response.status} ${errorText.slice(0, 200)}`);
+  }
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const json = (await response.json()) as Record<string, any>;
+  const parts: any[] = json?.candidates?.[0]?.content?.parts ?? [];
+  let text = parts
+    .filter((p) => !p?.thought)
+    .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+    .join('')
+    .trim();
+
+  if (!text) {
+    throw new Error('Music prompt generation returned empty response');
+  }
+
+  // Strip code fences if present
+  if (text.startsWith('```')) {
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  }
+
+  // Try full JSON parse first
+  try {
+    const parsed = JSON.parse(text) as { musicPrompt?: string };
+    if (parsed.musicPrompt && typeof parsed.musicPrompt === 'string') {
+      return parsed.musicPrompt.trim();
+    }
+  } catch {
+    console.warn('[story] Music prompt JSON parse failed, attempting regex extraction');
+  }
+
+  // Fallback: extract the musicPrompt value via regex
+  const promptMatch = text.match(/"musicPrompt"\s*:\s*"((?:[^"\\]|\\.)*)("?)/s);
+  if (promptMatch) {
+    const extracted = promptMatch[1]
+      .replace(/\\n/g, ' ')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+      .trim();
+    if (extracted.length > 5) {
+      return extracted;
+    }
+  }
+
+  // Last resort: strip all JSON artifacts
+  const cleaned = text
+    .replace(/^\s*\{\s*"musicPrompt"\s*:\s*"?/i, '')
+    .replace(/"?\s*\}\s*$/, '')
+    .replace(/\\n/g, ' ')
+    .replace(/\\"/g, '"')
+    .trim();
+
+  return cleaned || text;
+}

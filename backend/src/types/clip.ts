@@ -41,6 +41,7 @@ export interface Clip {
   narrationScript?: string;
   scenePrompts?: string[];
   caption?: string; // TikTok/social media caption
+  musicPrompt?: string; // user-editable prompt for background music generation
 
   // Status
   status: ClipStatus;

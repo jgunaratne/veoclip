@@ -37,6 +37,7 @@ interface Clip {
   videoPath?: string;
   enableNarration?: boolean;
   enableMusic?: boolean;
+  musicPrompt?: string;
 }
 
 export default function CreatePage() {
@@ -51,6 +52,8 @@ export default function CreatePage() {
   const [length, setLength] = useState(30);
   const [ensureContinuity, setEnsureContinuity] = useState(false);
   const [enableMusic, setEnableMusic] = useState(true);
+  const [musicPrompt, setMusicPrompt] = useState("");
+  const [isMusicPromptSuggesting, setIsMusicPromptSuggesting] = useState(false);
 
   // Generate a narrator character on-demand via button click
   const suggestCharacterRef = useRef<AbortController | null>(null);
@@ -79,6 +82,34 @@ export default function CreatePage() {
       setIsCharacterSuggesting(false);
     }
   }, [storyText, isCharacterSuggesting]);
+
+  // Generate a music prompt on-demand via button click
+  const suggestMusicRef = useRef<AbortController | null>(null);
+  const handleSuggestMusicPrompt = useCallback(async () => {
+    if (!storyText.trim() || isMusicPromptSuggesting) return;
+    suggestMusicRef.current?.abort();
+    const controller = new AbortController();
+    suggestMusicRef.current = controller;
+    setIsMusicPromptSuggesting(true);
+    try {
+      const res = await fetch("/api/suggest-music-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyText }),
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.musicPrompt) {
+          setMusicPrompt(data.musicPrompt);
+        }
+      }
+    } catch {
+      // Ignore — suggestion is best-effort
+    } finally {
+      setIsMusicPromptSuggesting(false);
+    }
+  }, [storyText, isMusicPromptSuggesting]);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -186,7 +217,7 @@ export default function CreatePage() {
       const genRes = await fetch(`/api/clips/${clip.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ narrationScript: editedNarration }),
+        body: JSON.stringify({ narrationScript: editedNarration, musicPrompt }),
       });
 
       if (!genRes.ok) {
@@ -235,7 +266,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [clip, editedNarration, startPolling]);
+  }, [clip, editedNarration, musicPrompt, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
@@ -364,6 +395,25 @@ export default function CreatePage() {
               value={enableMusic}
               onChange={(checked) => setEnableMusic(checked)}
             />
+
+            {enableMusic && (
+              <div className={styles.characterSection}>
+                <PromptInput
+                  label={isMusicPromptSuggesting ? "Music Prompt — generating…" : "Music Prompt"}
+                  value={musicPrompt}
+                  onChange={setMusicPrompt}
+                  placeholder="Describe the mood and style of background music — e.g. 'Warm, nostalgic acoustic guitar with soft strings, evoking a sunset road trip'"
+                  maxLength={2000}
+                  rows={2}
+                />
+                <Button
+                  variant="secondary"
+                  label={isMusicPromptSuggesting ? "Generating…" : "✨ Auto-generate from text"}
+                  isDisabled={!storyText.trim() || isMusicPromptSuggesting}
+                  clickAction={handleSuggestMusicPrompt}
+                />
+              </div>
+            )}
 
             {clip?.status === "script_ready" && (
               <div className={styles.scriptPreview}>
