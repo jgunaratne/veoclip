@@ -1,2 +1,6 @@
 /* Navbar styling is now handled by Astryx TopNav component. */
-/* This file is intentionally left minimal. */
+/* Additional padding to accommodate the sidebar hamburger button. */
+
+.nav {
+  padding-left: 48px;
+}
