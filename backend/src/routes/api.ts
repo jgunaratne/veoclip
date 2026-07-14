@@ -80,8 +80,11 @@ async function ensureJpeg(filePath: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
+// Deliberately safe fallback prompt for presenter mode.
+const PRESENTER_FALLBACK_SCENE =
+  'A static locked-off shot of a blank bright green chroma key screen background (#00FF00). ' +
+  'No movement, no people, no objects, no transitions. ' +
+  'Absolute complete silence. No sound, no background noise, no ambient audio, no voice, no music, no sound effects.';
 
 export const apiRouter = Router();
 
@@ -224,7 +227,8 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
         'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
         'Continuous uninterrupted shot from start to finish. ' +
-        'No background noise, no music, no background sound effects. Clear spoken voice only. Dead silent background environment.';
+        'No background noise, no music, no background sound effects, no audio transitions, no whooshes, no swooshes, no entry/exit audio effects. ' +
+        'The sound must be only the person\'s clean spoken voice, with absolute silence between words.';
 
       updateClip(clip.id, {
         narrationScript: presenterResult.narrationScript,
@@ -451,7 +455,8 @@ async function runPipeline(clipId: string): Promise<void> {
             'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
             'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
             'Continuous uninterrupted shot from start to finish. ' +
-            'No background noise, no music, no background sound effects. Clear spoken voice only. Dead silent background environment. ' +
+            'No background noise, no music, no background sound effects, no audio transitions, no whooshes, no swooshes, no entry/exit audio effects. ' +
+            'The sound must be only the person\'s clean spoken voice, with absolute silence between words. ' +
             `The person says out loud: "${segText}"`,
         };
       }
@@ -499,7 +504,7 @@ async function runPipeline(clipId: string): Promise<void> {
           );
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
-            prompt: SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
+            prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
@@ -552,7 +557,7 @@ async function runPipeline(clipId: string): Promise<void> {
             );
             segVideoPath = await generateVideo({
               imagePath: seedImagePath,
-              prompt: SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
+              prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
