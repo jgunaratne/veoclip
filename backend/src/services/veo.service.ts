@@ -376,7 +376,7 @@ export async function generateVideo(opts: {
   const sharedOpts = { imageBase64, mimeType, prompt, duration, outputDir, clipId };
 
   const MAX_RETRIES = 3;
-  const BACKOFF_SECONDS = [30, 60, 120];
+  const BACKOFF_SECONDS = [10, 20, 40];
 
   for (let attempt = 0; ; attempt++) {
     try {
