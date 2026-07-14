@@ -9,7 +9,7 @@ import PromptInput from "../components/PromptInput";
 import DurationPicker from "../components/DurationPicker";
 import StatusTracker from "../components/StatusTracker";
 import VideoPlayer from "../components/VideoPlayer";
-import styles from "../page.module.css";
+import styles from "./page.module.css";
 
 type ClipStatus =
   | "idle"
