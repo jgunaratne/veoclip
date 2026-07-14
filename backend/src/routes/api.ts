@@ -227,6 +227,7 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
         'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
         'Continuous uninterrupted shot from start to finish. ' +
+        'Absolutely no video transitions, no jump cuts, no video fades, no wipes, no cross-dissolves, no scene changes, no zoom cuts. The video must look like one single continuous take. ' +
         'No background noise, no music, no background sound effects, no audio transitions, no whooshes, no swooshes, no entry/exit audio effects. ' +
         'The sound must be only the person\'s clean spoken voice, with absolute silence between words.';
 
@@ -455,6 +456,7 @@ async function runPipeline(clipId: string): Promise<void> {
             'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
             'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
             'Continuous uninterrupted shot from start to finish. ' +
+            'Absolutely no video transitions, no jump cuts, no video fades, no wipes, no cross-dissolves, no scene changes, no zoom cuts. The video must look like one single continuous take. ' +
             'No background noise, no music, no background sound effects, no audio transitions, no whooshes, no swooshes, no entry/exit audio effects. ' +
             'The sound must be only the person\'s clean spoken voice, with absolute silence between words. ' +
             `The person says out loud: "${segText}"`,
