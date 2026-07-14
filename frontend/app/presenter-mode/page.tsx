@@ -232,7 +232,7 @@ export default function PresenterModePage() {
                 error={clip.error}
                 currentSegment={clip.currentSegment}
                 totalSegments={clip.totalSegments}
-                enableNarration={true}
+                enableNarration={false}
                 enableMusic={false}
                 onRetry={handleRetry}
               />

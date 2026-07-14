@@ -386,9 +386,9 @@ Return ONLY valid JSON (no markdown fences) with this structure:
 
 /** Deliberately safe fallback prompt for scenes rejected by the safety filter. */
 export const SAFE_FALLBACK_SCENE =
-  'A slow cinematic camera drift through an abstract, softly lit landscape of ' +
-  'light, color, and gentle shapes, evoking a calm documentary mood. Ambient ' +
-  'sound only. No people, no text, no dialogue.';
+  'A slow cinematic camera drift with abstract, softly lit shapes and gentle motion ' +
+  'against a solid bright green chroma key screen background. Calm documentary mood. ' +
+  'Ambient sound only. No people, no text, no dialogue.';
 
 // ---------------------------------------------------------------------------
 // Character profile auto-generation
