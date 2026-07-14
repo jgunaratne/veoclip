@@ -243,15 +243,17 @@ export async function generatePresenterScript(opts: {
   // ~2.5 words per second for a conversational pace
   const narrationWords = Math.floor(targetSeconds * 2.5);
 
-  const prompt = `You are writing a presenter narration script for a ${targetSeconds}-second talking-head video. A single person will speak directly to the camera.
+  const prompt = `You are writing a casual, social-media-style presenter script for a ${targetSeconds}-second talking-head video. Think TikTok, Instagram Reel, or YouTube Short — one person speaking directly to the camera like they're chatting with a friend.
 
 Given the source text below, create:
 
 1. A narration script of AT MOST ${narrationWords} words, paced to finish within \
 ${targetSeconds} seconds of natural speech. It should be:
-- Engaging and conversational, as if the presenter is speaking directly to the viewer
-- Informative and accurate, drawn from the source text
-- Natural-sounding — avoid stiff or overly formal language
+- Super casual and conversational — like someone filming themselves on their phone
+- Use short punchy sentences, natural pauses, and direct address ("you", "look", "okay so")
+- Engaging and hook-driven — start with something attention-grabbing
+- Informative but not stiff — explain things simply like talking to a friend
+- Feel free to use filler words sparingly for authenticity ("like", "honestly", "basically")
 - CRITICAL: The narration will be read aloud by a text-to-speech model with strict content filters. \
 The script MUST NOT mention: alcohol, alcoholism, drugs, drinking, drunkenness, guns, firearms, weapons, \
 violence, aggression, injuries, death, crime, theft, sexual content, or any dangerous/harmful activities. \
