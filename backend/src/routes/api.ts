@@ -223,7 +223,8 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         'Solid bright green chroma key screen background. Natural casual lighting. ' +
         'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
         'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
-        'Continuous uninterrupted shot from start to finish.';
+        'Continuous uninterrupted shot from start to finish. ' +
+        'No background noise, no music, no background sound effects. Clear spoken voice only. Dead silent background environment.';
 
       updateClip(clip.id, {
         narrationScript: presenterResult.narrationScript,
@@ -450,6 +451,7 @@ async function runPipeline(clipId: string): Promise<void> {
             'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
             'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
             'Continuous uninterrupted shot from start to finish. ' +
+            'No background noise, no music, no background sound effects. Clear spoken voice only. Dead silent background environment. ' +
             `The person says out loud: "${segText}"`,
         };
       }
