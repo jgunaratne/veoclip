@@ -414,11 +414,27 @@ async function runPipeline(clipId: string): Promise<void> {
     }
 
     if (clip.mode === 'presenter') {
-      // Split narration into segments and embed into Veo prompts
-      const sentences = story.narrationScript.match(/[^.!?]+[.!?]+/g) || [story.narrationScript];
-      const perSegment = Math.ceil(sentences.length / segmentCount);
+      // Split narration into equal-length chunks by word count, ensuring every segment gets text
+      const words = story.narrationScript.split(/\s+/).filter(Boolean);
+      const totalWords = words.length;
+      const wordsPerSegment = Math.max(1, Math.floor(totalWords / segmentCount));
+      const segmentTexts: string[] = [];
+
+      for (let i = 0; i < segmentCount; i++) {
+        const start = i * wordsPerSegment;
+        const end = i === segmentCount - 1 ? totalWords : (i + 1) * wordsPerSegment;
+        const chunk = words.slice(start, end).join(' ');
+        segmentTexts.push(chunk);
+      }
+
+      // Merge any trailing empty segments into the last non-empty one
+      while (segmentTexts.length > 1 && !segmentTexts[segmentTexts.length - 1]) {
+        segmentTexts.pop();
+      }
+
       for (let i = 0; i < Math.min(story.scenes.length, segmentCount); i++) {
-        const segText = sentences.slice(i * perSegment, (i + 1) * perSegment).join(' ').trim();
+        // If we have text for this segment, use it; otherwise repeat the last chunk
+        const segText = segmentTexts[i] || segmentTexts[segmentTexts.length - 1] || story.narrationScript;
         story.scenes[i] = {
           prompt:
             'A person speaking naturally and directly to camera against a solid bright green ' +
@@ -427,7 +443,7 @@ async function runPipeline(clipId: string): Promise<void> {
             `The person says out loud: "${segText}"`,
         };
       }
-      console.log(`[pipeline] Presenter mode: embedded narration into ${segmentCount} scene prompt(s)`);
+      console.log(`[pipeline] Presenter mode: embedded narration into ${segmentCount} segment(s), ${totalWords} words total, ~${wordsPerSegment} words/segment`);
     }
 
     // Ensure ALL clips are generated on a green screen background
