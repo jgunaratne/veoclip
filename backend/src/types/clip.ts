@@ -33,6 +33,7 @@ export interface Clip {
   speakerVoice: string;
   characterProfile?: string; // persona description — shapes how the TTS narrates
   enableMusic?: boolean; // generate background music via Lyria
+  enableNarration?: boolean; // enable voiceover narration
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
 

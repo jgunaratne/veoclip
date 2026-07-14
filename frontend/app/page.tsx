@@ -42,6 +42,7 @@ export default function CreatePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [storyText, setStoryText] = useState("");
   const [voice, setVoice] = useState("Puck");
+  const [enableNarration, setEnableNarration] = useState(true);
   const [useCustomVoice, setUseCustomVoice] = useState(false);
   const [characterProfile, setCharacterProfile] = useState("");
   const [isCharacterSuggesting, setIsCharacterSuggesting] = useState(false);
@@ -127,7 +128,8 @@ export default function CreatePage() {
       formData.append("length", String(length));
       formData.append("ensureContinuity", String(ensureContinuity));
       formData.append("enableMusic", String(enableMusic));
-      if (useCustomVoice && characterProfile.trim()) {
+      formData.append("enableNarration", String(enableNarration));
+      if (useCustomVoice && characterProfile.trim() && enableNarration) {
         formData.append("characterProfile", characterProfile.trim());
       }
 
@@ -171,7 +173,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [files, storyText, voice, length, ensureContinuity, enableMusic, useCustomVoice, characterProfile]);
+  }, [files, storyText, voice, length, ensureContinuity, enableMusic, enableNarration, useCustomVoice, characterProfile]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -305,32 +307,44 @@ export default function CreatePage() {
 
             <div className={styles.settings}>
               <DurationPicker value={length} onChange={setLength} />
-              <VoiceSelector value={voice} onChange={setVoice} />
+              {enableNarration && <VoiceSelector value={voice} onChange={setVoice} />}
             </div>
+
             <CheckboxInput
-              label="Use custom character voice"
-              description="Give the narrator a distinct persona — tone, pacing, and personality."
-              value={useCustomVoice}
-              onChange={(checked) => setUseCustomVoice(checked)}
+              label="Add voiceover narration"
+              description="Generates custom spoken narration text-to-speech drawn from the story."
+              value={enableNarration}
+              onChange={(checked) => setEnableNarration(checked)}
             />
 
-            {useCustomVoice && (
-              <div className={styles.characterSection}>
-                <PromptInput
-                  label={isCharacterSuggesting ? "Narrator Character — generating…" : "Narrator Character"}
-                  value={characterProfile}
-                  onChange={setCharacterProfile}
-                  placeholder="Describe the narrator's persona — e.g. 'A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency'."
-                  maxLength={2000}
-                  rows={3}
+            {enableNarration && (
+              <>
+                <CheckboxInput
+                  label="Use custom character voice"
+                  description="Give the narrator a distinct persona — tone, pacing, and personality."
+                  value={useCustomVoice}
+                  onChange={(checked) => setUseCustomVoice(checked)}
                 />
-                <Button
-                  variant="secondary"
-                  label={isCharacterSuggesting ? "Generating…" : "✨ Auto-generate from text"}
-                  isDisabled={!storyText.trim() || isCharacterSuggesting}
-                  clickAction={handleSuggestCharacter}
-                />
-              </div>
+
+                {useCustomVoice && (
+                  <div className={styles.characterSection}>
+                    <PromptInput
+                      label={isCharacterSuggesting ? "Narrator Character — generating…" : "Narrator Character"}
+                      value={characterProfile}
+                      onChange={setCharacterProfile}
+                      placeholder="Describe the narrator's persona — e.g. 'A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency'."
+                      maxLength={2000}
+                      rows={3}
+                    />
+                    <Button
+                      variant="secondary"
+                      label={isCharacterSuggesting ? "Generating…" : "✨ Auto-generate from text"}
+                      isDisabled={!storyText.trim() || isCharacterSuggesting}
+                      clickAction={handleSuggestCharacter}
+                    />
+                  </div>
+                )}
+              </>
             )}
 
             <CheckboxInput
