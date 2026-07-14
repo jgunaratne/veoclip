@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import styles from "./Sidebar.module.css";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Story Mode", icon: "📝" },
+  { href: "/story-mode", label: "Story Mode", icon: "📝" },
   { href: "/presenter-mode", label: "Presenter Mode", icon: "🎤" },
 ];
 
