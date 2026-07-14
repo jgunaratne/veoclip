@@ -6,7 +6,6 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import Navbar from "../components/Navbar";
 import PromptInput from "../components/PromptInput";
-import VoiceSelector from "../components/VoiceSelector";
 import DurationPicker from "../components/DurationPicker";
 import StatusTracker from "../components/StatusTracker";
 import VideoPlayer from "../components/VideoPlayer";
@@ -43,38 +42,7 @@ export default function PresenterModePage() {
   // Form state
   const [faceFile, setFaceFile] = useState<File | null>(null);
   const [storyText, setStoryText] = useState("");
-  const [voice, setVoice] = useState("Puck");
   const [length, setLength] = useState(30);
-
-  // Character profile state
-  const [useCustomVoice, setUseCustomVoice] = useState(false);
-  const [characterProfile, setCharacterProfile] = useState("");
-  const [isCharacterSuggesting, setIsCharacterSuggesting] = useState(false);
-
-  const suggestCharacterRef = useRef<AbortController | null>(null);
-  const handleSuggestCharacter = useCallback(async () => {
-    if (!storyText.trim() || isCharacterSuggesting) return;
-    suggestCharacterRef.current?.abort();
-    const controller = new AbortController();
-    suggestCharacterRef.current = controller;
-    setIsCharacterSuggesting(true);
-    try {
-      const res = await fetch("/api/suggest-character", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storyText }),
-        signal: controller.signal,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.characterProfile) setCharacterProfile(data.characterProfile);
-      }
-    } catch {
-      // best-effort
-    } finally {
-      setIsCharacterSuggesting(false);
-    }
-  }, [storyText, isCharacterSuggesting]);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -120,15 +88,12 @@ export default function PresenterModePage() {
         formData.append("images", faceFile);
       }
       formData.append("storyText", storyText);
-      formData.append("speakerVoice", voice);
+      formData.append("speakerVoice", "Puck");
       formData.append("length", String(length));
-      formData.append("ensureContinuity", "true"); // Always sequential for presenter
-      formData.append("enableMusic", "false"); // No music for presenter
-      formData.append("enableNarration", "true"); // Always narrate
+      formData.append("ensureContinuity", "true");
+      formData.append("enableMusic", "false");
+      formData.append("enableNarration", "false"); // Speech is in the Veo video directly
       formData.append("mode", "presenter");
-      if (useCustomVoice && characterProfile.trim()) {
-        formData.append("characterProfile", characterProfile.trim());
-      }
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -164,7 +129,7 @@ export default function PresenterModePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [faceFile, storyText, voice, length, useCustomVoice, characterProfile]);
+  }, [faceFile, storyText, length]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -338,51 +303,8 @@ export default function PresenterModePage() {
 
             <div className={styles.settings}>
               <DurationPicker value={length} onChange={setLength} />
-              <VoiceSelector value={voice} onChange={setVoice} />
             </div>
 
-            <div className={styles.characterSection}>
-              <label style={{ fontWeight: 600, fontSize: "0.875rem" }}>
-                {useCustomVoice ? "Custom narrator voice enabled" : ""}
-              </label>
-            </div>
-
-            <Button
-              variant="secondary"
-              label={
-                useCustomVoice
-                  ? "Disable custom character voice"
-                  : "🎭 Use custom character voice"
-              }
-              clickAction={() => setUseCustomVoice(!useCustomVoice)}
-            />
-
-            {useCustomVoice && (
-              <div className={styles.characterSection}>
-                <PromptInput
-                  label={
-                    isCharacterSuggesting
-                      ? "Narrator Character — generating…"
-                      : "Narrator Character"
-                  }
-                  value={characterProfile}
-                  onChange={setCharacterProfile}
-                  placeholder="Describe the narrator's persona — e.g. 'A friendly tech reviewer who explains complex topics in a casual, approachable way'."
-                  maxLength={2000}
-                  rows={3}
-                />
-                <Button
-                  variant="secondary"
-                  label={
-                    isCharacterSuggesting
-                      ? "Generating…"
-                      : "✨ Auto-generate from text"
-                  }
-                  isDisabled={!storyText.trim() || isCharacterSuggesting}
-                  clickAction={handleSuggestCharacter}
-                />
-              </div>
-            )}
 
             {clip?.status === "script_ready" && (
               <div className={styles.scriptPreview}>
