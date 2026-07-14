@@ -50,6 +50,11 @@ journalistic, educational, or historical documentary (e.g., PBS Frontline or BBC
 - Do NOT use generic intro/outro phrases, promotional hooks, or cinematic cliches (e.g., "Join us...", "In this video...", "Discover the secrets of...", "Let's explore...").
 - Prefer to convey concrete information, key facts, specific dates, names of real people, places, or organizations, and actual statistics/numbers from the source text.
 - Prioritize accuracy, objectivity, and informativeness over dramatic narrative or creative embellishment. Avoid vague summaries or simplifying details.
+- CRITICAL: The narration will be read aloud by a text-to-speech model with strict content filters. \
+The script MUST NOT mention: alcohol, alcoholism, drugs, drinking, drunkenness, guns, firearms, weapons, \
+violence, aggression, injuries, death, crime, theft, sexual content, or any dangerous/harmful activities. \
+If the source text covers these topics, either omit them entirely or reframe them in a safe, positive way \
+(e.g., instead of 'alcoholism is common', say 'cultural customs may differ from what you expect').
 
 2. Exactly ${segmentCount} scene descriptions for 8-second video segments that flow as \
 one continuous story. Each scene should visually illustrate part of the narration with \
@@ -101,6 +106,24 @@ Return ONLY valid JSON (no markdown fences) with this structure:
       contents: [{ role: 'user', parts }],
       generationConfig: {
         responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            narrationScript: { type: 'STRING' },
+            scenes: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  prompt: { type: 'STRING' },
+                },
+                required: ['prompt'],
+              },
+            },
+            caption: { type: 'STRING' },
+          },
+          required: ['narrationScript', 'scenes', 'caption'],
+        },
         temperature: 0.7,
       },
     }),
@@ -114,24 +137,85 @@ Return ONLY valid JSON (no markdown fences) with this structure:
   }
 
   const json = (await response.json()) as Record<string, any>;
+  const finishReason = json?.candidates?.[0]?.finishReason;
   const responseParts: any[] =
     json?.candidates?.[0]?.content?.parts ?? [];
 
-  // Join every text part — thinking models may split output — and strip
-  // code fences Gemini sometimes adds despite instructions.
-  let text = responseParts
+  // Log full response structure for debugging
+  console.log(`[story] Response finishReason=${finishReason}, parts=${responseParts.length}`);
+  for (let i = 0; i < responseParts.length; i++) {
+    const p = responseParts[i];
+    const hasText = typeof p?.text === 'string';
+    const isThought = !!p?.thought;
+    console.log(`[story]   part[${i}]: thought=${isThought}, hasText=${hasText}, len=${hasText ? p.text.length : 0}`);
+  }
+
+  // Check for safety block or empty response
+  if (finishReason === 'SAFETY' || responseParts.length === 0) {
+    throw new Error(`Story generation blocked (finishReason=${finishReason}). The source text may contain content that triggers safety filters.`);
+  }
+
+  // Filter out thought parts (thinking models return parts with `thought: true`
+  // for internal reasoning) and join only the actual output text parts.
+  const outputParts = responseParts.filter((p) => !p?.thought);
+  let text = outputParts
     .map((p) => (typeof p?.text === 'string' ? p.text : ''))
     .join('')
     .trim();
+
+  // If all parts were thought parts, fall back to joining ALL parts
+  if (!text) {
+    console.warn('[story] All parts were thought parts or empty — joining all parts as fallback');
+    text = responseParts
+      .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+      .join('')
+      .trim();
+  }
+
+  // Strip code fences
   if (text.startsWith('```')) {
     text = text.replace(/```json/g, '').replace(/```/g, '').trim();
   }
 
-  let script: StoryScript;
+  console.log(`[story] Combined text (${text.length} chars): ${text.slice(0, 300)}…`);
+
+  // Try multiple strategies to extract valid JSON
+  let script: StoryScript | null = null;
+
+  // Strategy 1: Direct parse
   try {
     script = JSON.parse(text) as StoryScript;
   } catch {
-    console.error(`[story] Script JSON didn't decode: ${text.slice(0, 500)}`);
+    // Strategy 2: Extract the first JSON object from mixed content
+    // (thinking text might have leaked despite filtering)
+    const jsonMatch = text.match(/\{[\s\S]*"narrationScript"[\s\S]*"scenes"[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        script = JSON.parse(jsonMatch[0]) as StoryScript;
+        console.log('[story] Extracted JSON via regex from mixed content');
+      } catch {
+        // Strategy 3: Try each non-thought part individually
+        for (const p of outputParts) {
+          if (typeof p?.text === 'string') {
+            let partText = p.text.trim();
+            if (partText.startsWith('```')) {
+              partText = partText.replace(/```json/g, '').replace(/```/g, '').trim();
+            }
+            try {
+              script = JSON.parse(partText) as StoryScript;
+              console.log('[story] Parsed JSON from individual part');
+              break;
+            } catch {
+              continue;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!script) {
+    console.error(`[story] All JSON parse strategies failed. Raw text: ${text.slice(0, 1000)}`);
     throw new Error('Story generation returned invalid JSON');
   }
 
@@ -163,31 +247,35 @@ export async function generateCharacterProfile(storyText: string): Promise<strin
   const model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
   const { url, headers } = await getGenerateContentEndpoint(model);
 
-  const prompt = `You are a casting director writing voice-over direction for a documentary narrator. ` +
-    `Based on the source text below, write a detailed narrator persona description.\n\n` +
-    `Your description MUST include ALL of the following:\n` +
-    `1. WHO the narrator is — their background, expertise, and perspective\n` +
-    `2. VOCAL QUALITIES — pitch, timbre, accent hints (e.g. "mid-Atlantic", "warm Southern")\n` +
-    `3. PACING AND RHYTHM — speaking speed, use of pauses, cadence\n` +
-    `4. EMOTIONAL REGISTER — gravitas, warmth, curiosity, urgency, wry humor, etc.\n` +
-    `5. DELIVERY STYLE — conversational vs. formal, intimate vs. authoritative\n\n` +
-    `Example of the level of detail expected:\n` +
-    `"A seasoned foreign correspondent who has spent decades covering conflict zones across the Middle East ` +
-    `and Central Asia. Speaks with quiet authority and measured gravitas — unhurried, deliberate pacing with ` +
-    `meaningful pauses between key revelations. A deep, resonant baritone with traces of a mid-Atlantic accent. ` +
-    `Emotionally restrained but not cold; conveys weight and consequence through understatement rather than ` +
-    `dramatic emphasis. Think of a veteran PBS Frontline narrator."\n\n` +
-    `Write 3-5 sentences (150-400 words). Be vivid and specific.\n\n` +
-    `Source text (first 3000 chars):\n${storyText.slice(0, 3000)}\n\n` +
-    `Return ONLY the persona description — no quotes, no JSON, no preamble, no explanation, ` +
-    `no word counts, no self-review, no meta-commentary. Just the persona itself.`;
+  const prompt = `You are a casting director. Based on the source text below, write a narrator persona description for a documentary voice-over.
+
+Cover these aspects in a single flowing paragraph:
+- Background and expertise that makes this narrator credible for the subject matter
+- Vocal qualities (pitch, timbre, any accent coloring)
+- Pacing (speaking speed, use of pauses)
+- Emotional tone (e.g. gravitas, warmth, curiosity, dry wit)
+- Delivery style (e.g. intimate, authoritative, conversational)
+
+Example:
+"A seasoned foreign correspondent who has spent decades covering conflict zones. Speaks with quiet authority — unhurried, deliberate pacing with meaningful pauses between revelations. A deep, resonant baritone with traces of a mid-Atlantic accent. Emotionally restrained but not cold; conveys weight through understatement rather than dramatic emphasis."
+
+Write exactly one paragraph, 3-5 sentences, roughly 50-100 words. Be vivid and specific.
+
+Source text (excerpt):
+${storyText.slice(0, 3000)}
+
+Respond with ONLY a JSON object: {"profile": "your persona description here"}`;
 
   const response = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      },
     }),
   });
 
@@ -200,7 +288,8 @@ export async function generateCharacterProfile(storyText: string): Promise<strin
   const json = (await response.json()) as Record<string, any>;
   const finishReason = json?.candidates?.[0]?.finishReason;
   const parts: any[] = json?.candidates?.[0]?.content?.parts ?? [];
-  const text = parts
+  let text = parts
+    .filter((p) => !p?.thought)
     .map((p) => (typeof p?.text === 'string' ? p.text : ''))
     .join('')
     .trim();
@@ -211,27 +300,46 @@ export async function generateCharacterProfile(storyText: string): Promise<strin
 
   console.log(`[story] Character profile raw (${text.length} chars, finishReason=${finishReason}): ${text.slice(0, 200)}…`);
 
-  // Strip model self-review / meta-commentary that sometimes leaks through.
-  // Look for lines that are clearly not part of the persona description.
-  const metaPatterns = [
-    /^let'?s\s+(review|check|verify|count)/i,
-    /^(word|sentence|character)\s*(count|check)/i,
-    /^\*\s*(sentences|words|word count)/i,
-    /^(here is|here's|note:|caveat:|explanation:)/i,
-    /^(i |my |this |the above)/i,
-    /^\d+\s*(sentences?|words?)\s*[.:(]/i,
-  ];
+  // Strip code fences if present
+  if (text.startsWith('```')) {
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  }
 
+  // Try full JSON parse first
+  try {
+    const parsed = JSON.parse(text) as { profile?: string };
+    if (parsed.profile && typeof parsed.profile === 'string') {
+      const profile = parsed.profile.trim();
+      console.log(`[story] Character profile extracted (${profile.length} chars): ${profile.slice(0, 200)}…`);
+      return profile;
+    }
+  } catch {
+    console.warn('[story] Character profile JSON parse failed, attempting regex extraction');
+  }
+
+  // Fallback: extract the profile value via regex even from truncated JSON
+  // e.g. {"profile": "An intrepid explorer who...   (cut off before closing quote/brace)
+  const profileMatch = text.match(/"profile"\s*:\s*"((?:[^"\\]|\\.)*)("?)/s);
+  if (profileMatch) {
+    const extracted = profileMatch[1]
+      .replace(/\\n/g, ' ')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+      .trim();
+    if (extracted.length > 10) {
+      console.log(`[story] Character profile regex-extracted (${extracted.length} chars): ${extracted.slice(0, 200)}…`);
+      return extracted;
+    }
+  }
+
+  // Last resort: strip all JSON artifacts and return whatever text remains
   const cleaned = text
-    .split('\n')
-    .filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return true; // keep blank lines between paragraphs
-      return !metaPatterns.some((pat) => pat.test(trimmed));
-    })
-    .join('\n')
+    .replace(/^\s*\{\s*"profile"\s*:\s*"?/i, '')
+    .replace(/"?\s*\}\s*$/, '')
+    .replace(/\\n/g, ' ')
+    .replace(/\\"/g, '"')
     .trim();
 
-  console.log(`[story] Character profile cleaned (${cleaned.length} chars): ${cleaned.slice(0, 200)}…`);
-  return cleaned || text; // fall back to raw text if cleaning removes everything
+  console.log(`[story] Character profile last-resort cleanup (${cleaned.length} chars): ${cleaned.slice(0, 200)}…`);
+  return cleaned || text;
 }

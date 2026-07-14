@@ -375,9 +375,33 @@ export async function generateVideo(opts: {
 
   const sharedOpts = { imageBase64, mimeType, prompt, duration, outputDir, clipId };
 
-  if (mode === 'vertex') {
-    return generateVideoVertex(sharedOpts);
-  } else {
-    return generateVideoGemini(sharedOpts);
+  const MAX_RETRIES = 3;
+  const BACKOFF_SECONDS = [30, 60, 120];
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      if (mode === 'vertex') {
+        return await generateVideoVertex(sharedOpts);
+      } else {
+        return await generateVideoGemini(sharedOpts);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const errObj = err as { code?: number };
+      const isHighDemand =
+        message.toLowerCase().includes('high demand') || errObj.code === 14;
+
+      if (isHighDemand && attempt < MAX_RETRIES) {
+        const waitSec = BACKOFF_SECONDS[attempt];
+        console.warn(
+          `[veo] High demand error (attempt ${attempt + 1}/${MAX_RETRIES + 1}), ` +
+            `retrying in ${waitSec}s: ${message}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+        continue;
+      }
+
+      throw err;
+    }
   }
 }

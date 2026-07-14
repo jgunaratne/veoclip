@@ -1,5 +1,6 @@
 export type ClipStatus =
   | 'idle'
+  | 'script_ready'
   | 'uploading'
   | 'preparing_script'
   | 'generating_video'

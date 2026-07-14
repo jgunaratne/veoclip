@@ -170,8 +170,8 @@ apiRouter.post(
   },
 );
 
-// Start the generation pipeline (async — returns 202 immediately)
-apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
+// Generate story script without running the full pipeline
+apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
   const clip = getClip(req.params.id as string);
   if (!clip) {
     res.status(404).json({ error: 'Clip not found' });
@@ -181,6 +181,52 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   if (clip.status !== 'idle' && clip.status !== 'error') {
     res.status(409).json({ error: `Clip is already ${clip.status}` });
     return;
+  }
+
+  try {
+    const segmentCount = SEGMENT_COUNTS[clip.length];
+    updateClip(clip.id, { status: 'preparing_script' });
+
+    const story = await generateStory({
+      storyText: clip.storyText,
+      imagePaths: clip.referenceImagePaths,
+      targetSeconds: clip.length,
+      segmentCount,
+    });
+
+    updateClip(clip.id, {
+      narrationScript: story.narrationScript,
+      scenePrompts: story.scenes.map((s) => s.prompt),
+      caption: story.caption || undefined,
+      status: 'script_ready',
+    });
+
+    res.json(getClip(clip.id));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[api] Script generation failed for clip ${clip.id}:`, message);
+    updateClip(clip.id, { status: 'error', error: message });
+    res.status(500).json({ error: message });
+  }
+});
+
+// Start the generation pipeline (async — returns 202 immediately)
+apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
+  const clip = getClip(req.params.id as string);
+  if (!clip) {
+    res.status(404).json({ error: 'Clip not found' });
+    return;
+  }
+
+  if (clip.status !== 'idle' && clip.status !== 'error' && clip.status !== 'script_ready') {
+    res.status(409).json({ error: `Clip is already ${clip.status}` });
+    return;
+  }
+
+  // If the user sent an edited narrationScript, store it before launching
+  const { narrationScript: narrationOverride } = req.body ?? {};
+  if (narrationOverride && typeof narrationOverride === 'string') {
+    updateClip(clip.id, { narrationScript: narrationOverride });
   }
 
   // Return immediately
@@ -279,21 +325,35 @@ async function runPipeline(clipId: string): Promise<void> {
     );
 
     // ── Step 1: Write the story (narration + scene prompts) ──────────
-    updateClip(clipId, { status: 'preparing_script', totalSegments: segmentCount });
+    let story: { narrationScript: string; scenes: { prompt: string }[]; caption?: string };
+    const freshClip = getClip(clipId)!;
 
-    const story = await generateStory({
-      storyText: clip.storyText,
-      imagePaths: clip.referenceImagePaths,
-      targetSeconds: clip.length,
-      segmentCount,
-    });
+    if (freshClip.narrationScript && freshClip.scenePrompts && freshClip.scenePrompts.length > 0) {
+      // Script was pre-generated (or user-edited) — reuse stored data
+      console.log(`[pipeline] Reusing pre-generated script for clip ${clipId}`);
+      story = {
+        narrationScript: freshClip.narrationScript,
+        scenes: freshClip.scenePrompts.map((prompt) => ({ prompt })),
+        caption: freshClip.caption,
+      };
+      updateClip(clipId, { status: 'generating_video', totalSegments: segmentCount });
+    } else {
+      updateClip(clipId, { status: 'preparing_script', totalSegments: segmentCount });
 
-    updateClip(clipId, {
-      narrationScript: story.narrationScript,
-      scenePrompts: story.scenes.map((s) => s.prompt),
-      caption: story.caption || undefined,
-      status: 'generating_video',
-    });
+      story = await generateStory({
+        storyText: clip.storyText,
+        imagePaths: clip.referenceImagePaths,
+        targetSeconds: clip.length,
+        segmentCount,
+      });
+
+      updateClip(clipId, {
+        narrationScript: story.narrationScript,
+        scenePrompts: story.scenes.map((s) => s.prompt),
+        caption: story.caption || undefined,
+        status: 'generating_video',
+      });
+    }
 
     // ── Step 2: Generate Veo segments (Sequential vs Parallel) ──────
     const seedAssignments = assignSeedImages(
