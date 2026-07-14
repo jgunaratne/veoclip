@@ -215,7 +215,9 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
       const presenterPrompt =
         'A person speaking naturally and directly to camera against a solid bright green ' +
         'chroma key screen background. Professional studio lighting. The person talks with ' +
-        'subtle natural expressions and gestures, maintaining eye contact with the viewer.';
+        'subtle natural expressions and gestures, maintaining eye contact with the viewer. ' +
+        'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
+        'Continuous uninterrupted shot from start to finish.';
 
       updateClip(clip.id, {
         narrationScript: presenterResult.narrationScript,
@@ -440,6 +442,8 @@ async function runPipeline(clipId: string): Promise<void> {
             'A person speaking naturally and directly to camera against a solid bright green ' +
             'chroma key screen background. Professional studio lighting. The person talks with ' +
             'subtle natural expressions and gestures, maintaining eye contact with the viewer. ' +
+            'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
+            'Continuous uninterrupted shot from start to finish. ' +
             `The person says out loud: "${segText}"`,
         };
       }
