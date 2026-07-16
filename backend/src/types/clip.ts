@@ -26,6 +26,16 @@ export type PresenterPersonality =
   | 'warm'      // friendly, empathetic, inviting
   | 'intense';  // passionate, driven, urgent
 
+/** Presenter script style — controls structure & framing of the narration content. */
+export type PresenterStyle =
+  | 'social_media'  // quick-hit social content (default)
+  | 'personal'      // first-person personal story / anecdote
+  | 'news'          // objective news report / briefing
+  | 'educational'   // teaching / explainer
+  | 'storytelling'  // narrative third-person story
+  | 'review'        // product / experience review
+  | 'motivational'; // inspirational / self-help
+
 export const SEGMENT_DURATION = 8; // seconds (Veo max)
 
 export const SEGMENT_COUNTS: Record<StoryLength, number> = {
@@ -51,6 +61,7 @@ export interface Clip {
   ensureContinuity?: boolean;
   mode?: 'story' | 'presenter';
   presenterPersonality?: PresenterPersonality;
+  presenterStyle?: PresenterStyle;
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;
