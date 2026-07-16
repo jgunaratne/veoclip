@@ -89,6 +89,16 @@
   gap: 2px;
 }
 
+.navSection {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary, #888);
+  padding: 0.75rem 1.25rem 0.25rem;
+  margin-top: 0.25rem;
+}
+
 .navLink {
   display: flex;
   align-items: center;

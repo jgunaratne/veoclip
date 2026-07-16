@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import type { Clip, StoryLength, PresenterPersonality, PresenterStyle } from '../types/clip.js';
+import type { Clip, StoryLength, PresenterPersonality, PresenterStyle, VoiceAge, VoicePitch, VoiceTexture } from '../types/clip.js';
 import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
   getClip,
@@ -24,6 +24,8 @@ import {
 import {
   muxVideoAudio,
   concatenateVideos,
+  crossfadeVideos,
+  isolateSpeech,
   extractLastFrame,
 } from '../services/mux.service.js';
 import { generateBackgroundMusic } from '../services/music.service.js';
@@ -87,62 +89,170 @@ async function ensureJpeg(filePath: string): Promise<string> {
 // Shared scene prompt fragments
 // ---------------------------------------------------------------------------
 
+// Per-personality prompt fragments. The voice is split into composable parts
+// (tone / pitch / delivery) so user voice options can override individual
+// pieces without losing the personality's character.
+const PERSONALITY_STYLES: Record<
+  string,
+  { visual: string; tone: string; pitch: string; delivery: string }
+> = {
+  social: {
+    visual:
+      'A person casually talking directly to camera like they are recording a social media video, framed from the chest up, centered in the frame. ' +
+      'Relaxed, expressive, and animated — filming a solo video alone in a completely quiet room. Natural casual lighting on the person.',
+    tone: 'warm, clear',
+    pitch: 'medium-pitched',
+    delivery: 'natural conversational tone, steady volume, even pace',
+  },
+  calm: {
+    visual:
+      'A person speaking gently and directly to camera, framed from the chest up, centered in the frame. ' +
+      'Completely relaxed posture, minimal hand gestures, serene expression. Soft, even natural lighting.',
+    tone: 'soft, soothing',
+    pitch: 'low-to-medium-pitched',
+    delivery: 'slow and measured pace, calm and steady volume',
+  },
+  pensive: {
+    visual:
+      'A person speaking thoughtfully to camera, framed from the chest up, centered in the frame. ' +
+      'Slightly tilted head, occasionally looking slightly off-camera as if considering an idea, then returning to direct eye contact. Muted, contemplative natural lighting.',
+    tone: 'quiet, reflective',
+    pitch: 'medium-pitched',
+    delivery: 'deliberate pacing with thoughtful pauses, gentle volume',
+  },
+  happy: {
+    visual:
+      'A person speaking brightly to camera with a genuine warm smile, framed from the chest up, centered in the frame. ' +
+      'Open posture, natural smiling, eyes lit up with delight. Bright, warm natural lighting.',
+    tone: 'cheerful, bright',
+    pitch: 'medium-to-high-pitched',
+    delivery: 'upbeat natural pace, warm and pleasant volume',
+  },
+  energetic: {
+    visual:
+      'A person speaking with high energy directly to camera, framed from the chest up, centered in the frame. ' +
+      'Animated hand gestures, wide eyes, leaning slightly forward with excitement. Bright, dynamic lighting.',
+    tone: 'strong, energetic, clear',
+    pitch: 'medium-pitched',
+    delivery: 'fast-paced and enthusiastic delivery, confident volume',
+  },
+  serious: {
+    visual:
+      'A person speaking with authority directly to camera, framed from the chest up, centered in the frame. ' +
+      'Composed, upright posture, minimal but purposeful hand gestures. Professional, even studio-style lighting.',
+    tone: 'authoritative, resonant',
+    pitch: 'deep, low-pitched',
+    delivery: 'measured and deliberate pace, steady commanding volume',
+  },
+  witty: {
+    visual:
+      'A person speaking with a subtle knowing expression to camera, framed from the chest up, centered in the frame. ' +
+      'Occasional raised eyebrow, slight smirk, relaxed but sharp body language. Warm, slightly stylized natural lighting.',
+    tone: 'clever, articulate',
+    pitch: 'medium-pitched',
+    delivery: 'well-timed pacing with comedic beats, conversational volume',
+  },
+  warm: {
+    visual:
+      'A person speaking kindly and directly to camera, framed from the chest up, centered in the frame. ' +
+      'Open, welcoming posture, gentle nodding, soft genuine expressions. Warm golden-toned natural lighting.',
+    tone: 'gentle, friendly',
+    pitch: 'medium-pitched',
+    delivery: 'unhurried natural pace, soft and inviting volume',
+  },
+  intense: {
+    visual:
+      'A person speaking with focused passion directly to camera, framed from the chest up, centered in the frame. ' +
+      'Leaning slightly forward, purposeful hand gestures for emphasis, unwavering eye contact. Dramatic, focused lighting with slight contrast.',
+    tone: 'powerful, resonant',
+    pitch: 'medium-to-low-pitched',
+    delivery: 'varied pacing that builds intensity, strong and compelling volume',
+  },
+};
+
+// User voice-option phrases layered onto the personality defaults.
+const VOICE_PITCH_PHRASES: Record<Exclude<VoicePitch, 'default'>, string> = {
+  very_low: 'very deep, low-pitched',
+  low: 'low-pitched',
+  high: 'slightly high-pitched',
+  very_high: 'high-pitched',
+};
+
+const VOICE_TEXTURE_PHRASES: Record<Exclude<VoiceTexture, 'default'>, string> = {
+  raspy: 'with a distinctive gravelly rasp',
+  breathy: 'with a soft, breathy quality',
+  husky: 'with a smoky, husky edge',
+  bright: 'with a crisp, bright, polished quality',
+};
+
+const VOICE_AGE_PHRASES: Record<Exclude<VoiceAge, 'default'>, string> = {
+  gen_z:
+    'delivered with the contemporary intonation of a Gen Z twenty-something — relaxed modern inflection, occasional subtle vocal fry, casual rising emphasis',
+  millennial:
+    'delivered with the friendly, expressive cadence of a millennial in their early thirties — conversational and effortlessly casual',
+  gen_x:
+    'delivered with the grounded, unhurried cadence of a Gen X adult in their late forties',
+  mature:
+    'delivered with the measured, seasoned cadence of an older adult in their sixties',
+};
+
+export interface PresenterVoiceOptions {
+  age?: VoiceAge;
+  pitch?: VoicePitch;
+  texture?: VoiceTexture;
+}
+
 // Uniform talking-head prompt used for every presenter-mode segment.
 // Leads with the green screen and repeats the identical voice description in
 // every segment — each 8s clip is a separate Veo generation, so the prompt is
 // the only thing keeping voice, framing, and background consistent across cuts.
-// Now personality-aware: body language, energy, and delivery vary by mood.
-function getPresenterScenePrompt(personality: PresenterPersonality = 'social'): string {
-  const personalityVisuals: Record<string, string> = {
-    social:
-      'A person casually talking directly to camera like they are recording a social media video, framed from the chest up, centered in the frame. ' +
-      'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. Natural casual lighting on the person. ' +
-      'The person speaks in the exact same voice in every clip: a warm, clear, medium-pitched adult voice, natural conversational tone, steady volume, even pace.',
-    calm:
-      'A person speaking gently and directly to camera, framed from the chest up, centered in the frame. ' +
-      'Completely relaxed posture, minimal hand gestures, serene expression. Soft, even natural lighting. ' +
-      'The person speaks in the exact same voice in every clip: a soft, soothing, low-to-medium-pitched adult voice, slow and measured pace, calm and steady volume.',
-    pensive:
-      'A person speaking thoughtfully to camera, framed from the chest up, centered in the frame. ' +
-      'Slightly tilted head, occasionally looking slightly off-camera as if considering an idea, then returning to direct eye contact. Muted, contemplative natural lighting. ' +
-      'The person speaks in the exact same voice in every clip: a quiet, reflective, medium-pitched adult voice, deliberate pacing with thoughtful pauses, gentle volume.',
-    happy:
-      'A person speaking brightly to camera with a genuine warm smile, framed from the chest up, centered in the frame. ' +
-      'Open posture, natural smiling, eyes lit up with delight. Bright, warm natural lighting. ' +
-      'The person speaks in the exact same voice in every clip: a cheerful, bright, medium-to-high-pitched adult voice, upbeat natural pace, warm and pleasant volume.',
-    energetic:
-      'A person speaking with high energy directly to camera, framed from the chest up, centered in the frame. ' +
-      'Animated hand gestures, wide eyes, leaning slightly forward with excitement. Bright, dynamic lighting. ' +
-      'The person speaks in the exact same voice in every clip: a strong, energetic, clear adult voice, fast-paced and enthusiastic delivery, confident volume.',
-    serious:
-      'A person speaking with authority directly to camera, framed from the chest up, centered in the frame. ' +
-      'Composed, upright posture, minimal but purposeful hand gestures. Professional, even studio-style lighting. ' +
-      'The person speaks in the exact same voice in every clip: a deep, authoritative, resonant adult voice, measured and deliberate pace, steady commanding volume.',
-    witty:
-      'A person speaking with a subtle knowing expression to camera, framed from the chest up, centered in the frame. ' +
-      'Occasional raised eyebrow, slight smirk, relaxed but sharp body language. Warm, slightly stylized natural lighting. ' +
-      'The person speaks in the exact same voice in every clip: a clever, articulate, medium-pitched adult voice, well-timed pacing with comedic beats, conversational volume.',
-    warm:
-      'A person speaking kindly and directly to camera, framed from the chest up, centered in the frame. ' +
-      'Open, welcoming posture, gentle nodding, soft genuine expressions. Warm golden-toned natural lighting. ' +
-      'The person speaks in the exact same voice in every clip: a gentle, friendly, medium-pitched adult voice, unhurried natural pace, soft and inviting volume.',
-    intense:
-      'A person speaking with focused passion directly to camera, framed from the chest up, centered in the frame. ' +
-      'Leaning slightly forward, purposeful hand gestures for emphasis, unwavering eye contact. Dramatic, focused lighting with slight contrast. ' +
-      'The person speaks in the exact same voice in every clip: a powerful, resonant, medium-to-low-pitched adult voice, varied pacing that builds intensity, strong and compelling volume.',
-  };
+// Personality sets body language and the default voice; user voice options
+// (pitch / texture / generational cadence) override or extend it.
+export function getPresenterScenePrompt(
+  personality: PresenterPersonality = 'social',
+  voice: PresenterVoiceOptions = {},
+): string {
+  const style = PERSONALITY_STYLES[personality] || PERSONALITY_STYLES.social;
 
-  const visual = personalityVisuals[personality] || personalityVisuals.social;
+  const pitch =
+    voice.pitch && voice.pitch !== 'default' ? VOICE_PITCH_PHRASES[voice.pitch] : style.pitch;
+  const texture =
+    voice.texture && voice.texture !== 'default'
+      ? ` ${VOICE_TEXTURE_PHRASES[voice.texture]}`
+      : '';
+  const age =
+    voice.age && voice.age !== 'default' ? `, ${VOICE_AGE_PHRASES[voice.age]}` : '';
+
+  const article = /^[aeiou]/i.test(style.tone) ? 'an' : 'a';
+  const voiceSentence =
+    `The person speaks in the exact same voice in every clip: ` +
+    `${article} ${style.tone}, ${pitch} adult voice${texture}, ${style.delivery}${age}.`;
 
   return (
     'The entire background is a solid, uniform, bright green chroma key screen (#00FF00). ' +
     'A flat green screen fills every part of the frame behind the person — no room, no wall texture, no scenery, no furniture, no environment of any kind. ' +
-    visual + ' Same person, same voice, same energy, same framing throughout. ' +
+    style.visual + ' ' + voiceSentence + ' Same person, same voice, same energy, same framing throughout. ' +
     'One single continuous take from a static locked-off camera: no transitions, no cuts, no fades, no wipes, no cross-dissolves, no jump cuts, no scene changes, no camera movement, no zoom. ' +
+    'The person is completely alone in a silent, soundproofed studio — no one else is present: no audience, no crowd, no bystanders, no one off-camera. ' +
     'There is absolutely NO music of any kind: no background music, no soundtrack, no musical score, no instrumental music, no ambient music, no melody, no humming, no singing. ' +
+    'No laughter, no giggling, no audience reactions, no applause, no other voices. ' +
     'No background noise, no sound effects, no audio transitions, no whooshes. The only sound in the entire clip is the person\'s clean spoken voice. ' +
     'The person starts speaking immediately when the clip begins, speaks at a natural pace, and finishes saying the entire text completely just before the clip ends — the speech must never be cut off mid-word or mid-sentence.'
   );
+}
+
+// Voice options as stored on a clip, in the shape getPresenterScenePrompt takes.
+function clipVoiceOptions(clip: Clip): PresenterVoiceOptions {
+  return { age: clip.voiceAge, pitch: clip.voicePitch, texture: clip.voiceTexture };
+}
+
+// Validate a client-supplied voice option against the known phrase map.
+// Returns undefined for 'default', unknown values, or missing input.
+function parseVoiceOption<T extends string>(
+  value: unknown,
+  phrases: Partial<Record<T, string>>,
+): T | undefined {
+  return typeof value === 'string' && value in phrases ? (value as T) : undefined;
 }
 
 // Wrapped around EVERY story-mode scene prompt: green screen background first
@@ -164,6 +274,13 @@ const NEGATIVE_PROMPT =
   'on-screen text, captions, subtitles, watermark, logo, ' +
   'music, background music, soundtrack, musical score, instrumental music, ambient music, melody, jingle, humming, singing, ' +
   'background noise, sound effects, whoosh sounds, audio transitions';
+
+// Presenter mode: only the presenter's voice is allowed, so also suppress
+// every other human sound Veo likes to add to talking-head footage.
+const PRESENTER_NEGATIVE_PROMPT =
+  NEGATIVE_PROMPT +
+  ', laughter, laughing, giggling, chuckling, laugh track, audience, audience reactions, applause, clapping, ' +
+  'cheering, crowd noise, background voices, off-screen voices, chatter, multiple people talking, echo';
 
 // Deliberately safe fallback prompt for presenter mode.
 const PRESENTER_FALLBACK_SCENE =
@@ -274,7 +391,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, voiceAge, voicePitch, voiceTexture } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -306,9 +423,13 @@ apiRouter.post(
         enableNarration: enableNarration !== 'false' && enableNarration !== false,
         length: parsedLength,
         ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
+        crossfade: crossfade === 'true' || crossfade === true,
         mode: mode === 'presenter' ? 'presenter' : 'story',
         presenterPersonality: (mode === 'presenter' && presenterPersonality) ? presenterPersonality as PresenterPersonality : undefined,
         presenterStyle: (mode === 'presenter' && presenterStyle) ? presenterStyle as PresenterStyle : undefined,
+        voiceAge: mode === 'presenter' ? parseVoiceOption<VoiceAge>(voiceAge, VOICE_AGE_PHRASES) : undefined,
+        voicePitch: mode === 'presenter' ? parseVoiceOption<VoicePitch>(voicePitch, VOICE_PITCH_PHRASES) : undefined,
+        voiceTexture: mode === 'presenter' ? parseVoiceOption<VoiceTexture>(voiceTexture, VOICE_TEXTURE_PHRASES) : undefined,
         status: 'idle',
       };
 
@@ -350,7 +471,7 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         style: clip.presenterStyle,
       });
 
-      const scenePrompt = getPresenterScenePrompt(clip.presenterPersonality);
+      const scenePrompt = getPresenterScenePrompt(clip.presenterPersonality, clipVoiceOptions(clip));
       updateClip(clip.id, {
         narrationScript: presenterResult.narrationScript,
         narrationSegments: presenterResult.segments,
@@ -397,13 +518,28 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
     return;
   }
 
-  // If the user sent an edited narrationScript or musicPrompt, store them before launching
-  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride } = req.body ?? {};
+  // If the user sent an edited narrationScript, musicPrompt, or crossfade
+  // setting, store them before launching. The crossfade checkbox can be
+  // toggled after the clip was created, so the generate-time value wins.
+  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride } = req.body ?? {};
   if (narrationOverride && typeof narrationOverride === 'string') {
     updateClip(clip.id, { narrationScript: narrationOverride });
   }
   if (musicPromptOverride && typeof musicPromptOverride === 'string' && clip.mode !== 'presenter') {
     updateClip(clip.id, { musicPrompt: musicPromptOverride });
+  }
+  if (typeof crossfadeOverride === 'boolean') {
+    updateClip(clip.id, { crossfade: crossfadeOverride });
+  }
+  if (typeof continuityOverride === 'boolean') {
+    updateClip(clip.id, { ensureContinuity: continuityOverride });
+  }
+  if (clip.mode === 'presenter' && (voiceAgeOverride || voicePitchOverride || voiceTextureOverride)) {
+    updateClip(clip.id, {
+      voiceAge: parseVoiceOption<VoiceAge>(voiceAgeOverride, VOICE_AGE_PHRASES),
+      voicePitch: parseVoiceOption<VoicePitch>(voicePitchOverride, VOICE_PITCH_PHRASES),
+      voiceTexture: parseVoiceOption<VoiceTexture>(voiceTextureOverride, VOICE_TEXTURE_PHRASES),
+    });
   }
 
   // Return immediately
@@ -558,7 +694,7 @@ async function runPipeline(clipId: string): Promise<void> {
         personality: clip.presenterPersonality,
         style: clip.presenterStyle,
       });
-      const pipelineScenePrompt = getPresenterScenePrompt(clip.presenterPersonality);
+      const pipelineScenePrompt = getPresenterScenePrompt(clip.presenterPersonality, clipVoiceOptions(clip));
       story = {
         narrationScript: presenterResult.narrationScript,
         scenes: Array.from({ length: segmentCount }, () => ({ prompt: pipelineScenePrompt })),
@@ -604,13 +740,20 @@ async function runPipeline(clipId: string): Promise<void> {
     // ── Step 2: Generate Veo segments (Sequential vs Parallel) ──────
     const seedAssignments = assignSeedImages(seedImagePaths, segmentCount);
 
-    // For presenter mode, use the single face image for ALL segments
-    // and embed narration text into each scene prompt
+    // For presenter mode, seed segments with the single face image and embed
+    // narration text into each scene prompt. With continuity enabled the face
+    // only seeds the first segment — later segments continue from the previous
+    // segment's last frame, so motion flows across cuts. Without it, every
+    // segment restarts from the face photo (most faithful likeness, harder cuts).
     if (clip.mode === 'presenter' && seedImagePaths.length > 0) {
       seedAssignments.clear();
       const faceImage = seedImagePaths[0];
-      for (let i = 0; i < segmentCount; i++) {
-        seedAssignments.set(i, faceImage);
+      if (clip.ensureContinuity) {
+        seedAssignments.set(0, faceImage);
+      } else {
+        for (let i = 0; i < segmentCount; i++) {
+          seedAssignments.set(i, faceImage);
+        }
       }
     }
 
@@ -633,9 +776,9 @@ async function runPipeline(clipId: string): Promise<void> {
         const segText = segmentTexts[i] || segmentTexts[segmentTexts.length - 1] || story.narrationScript;
         story.scenes[i] = {
           prompt:
-            getPresenterScenePrompt(clip.presenterPersonality) +
+            getPresenterScenePrompt(clip.presenterPersonality, clipVoiceOptions(clip)) +
             ` The person says out loud: "${segText}"` +
-            ' This spoken voice is the ONLY audio — no background music or soundtrack anywhere in the clip.',
+            ' This spoken voice is the ONLY audio — no background music, no laughter, no other voices, no sounds of any kind anywhere in the clip.',
         };
       }
       console.log(
@@ -653,6 +796,7 @@ async function runPipeline(clipId: string): Promise<void> {
 
     const segmentPaths: string[] = [];
     const useContinuity = clip.ensureContinuity || clip.mode === 'presenter';
+    const negativePrompt = clip.mode === 'presenter' ? PRESENTER_NEGATIVE_PROMPT : NEGATIVE_PROMPT;
 
     if (useContinuity) {
       console.log(`[pipeline] Generating segments sequentially with continuity chaining`);
@@ -673,7 +817,7 @@ async function runPipeline(clipId: string): Promise<void> {
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
             prompt: scenePrompt,
-            negativePrompt: NEGATIVE_PROMPT,
+            negativePrompt,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
@@ -686,7 +830,7 @@ async function runPipeline(clipId: string): Promise<void> {
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
             prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + SCENE_STYLE_SUFFIX,
-            negativePrompt: NEGATIVE_PROMPT,
+            negativePrompt,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
@@ -728,7 +872,7 @@ async function runPipeline(clipId: string): Promise<void> {
             segVideoPath = await generateVideo({
               imagePath: seedImagePath,
               prompt: scenePrompt,
-              negativePrompt: NEGATIVE_PROMPT,
+              negativePrompt,
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
@@ -741,7 +885,7 @@ async function runPipeline(clipId: string): Promise<void> {
             segVideoPath = await generateVideo({
               imagePath: seedImagePath,
               prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + SCENE_STYLE_SUFFIX,
-              negativePrompt: NEGATIVE_PROMPT,
+              negativePrompt,
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
@@ -761,14 +905,12 @@ async function runPipeline(clipId: string): Promise<void> {
       segmentPaths.push(...results.map((r) => r.path));
     }
 
-    // Concatenate segments if we have more than one
+    // Join segments if we have more than one — crossfade or hard cuts
     let videoPath: string;
     if (segmentPaths.length > 1) {
-      videoPath = await concatenateVideos({
-        videoPaths: segmentPaths,
-        outputDir,
-        clipId,
-      });
+      videoPath = clip.crossfade
+        ? await crossfadeVideos({ videoPaths: segmentPaths, outputDir, clipId })
+        : await concatenateVideos({ videoPaths: segmentPaths, outputDir, clipId });
     } else {
       videoPath = segmentPaths[0];
     }
@@ -776,10 +918,21 @@ async function runPipeline(clipId: string): Promise<void> {
     // Save videoPath on the clip and clear segment counter
     updateClip(clipId, { videoPath, currentSegment: undefined });
 
-    // For presenter mode, the Veo video already contains speech — skip TTS/music/mux
+    // For presenter mode, the Veo video already contains speech — skip TTS/music/mux.
+    // Veo sometimes bakes music/laughter into the audio despite the prompts, so
+    // run a deterministic speech-isolation pass to scrub everything but the voice.
     if (clip.mode === 'presenter') {
       console.log(`[pipeline] Presenter mode: skipping TTS/music, using Veo output directly`);
-      updateClip(clipId, { finalPath: videoPath, status: 'complete' });
+      updateClip(clipId, { status: 'muxing' });
+      let finalPath = videoPath;
+      try {
+        finalPath = await isolateSpeech({ videoPath, outputDir, clipId });
+      } catch (err) {
+        console.warn(
+          `[pipeline] Speech isolation failed (non-fatal), using unfiltered audio: ${(err as Error).message}`,
+        );
+      }
+      updateClip(clipId, { finalPath, status: 'complete' });
       console.log(`[pipeline] Clip ${clipId} complete!`);
       return;
     }
