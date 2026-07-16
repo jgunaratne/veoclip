@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import type { Clip, StoryLength, PresenterPersonality, PresenterStyle, VoiceAge, VoicePitch, VoiceTexture, VoiceAccent } from '../types/clip.js';
+import type { Clip, ClipStatus, StoryLength, PresenterPersonality, PresenterStyle, VoiceAge, VoicePitch, VoiceTexture, VoiceAccent } from '../types/clip.js';
 import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
   getClip,
@@ -187,10 +187,10 @@ const PERSONALITY_STYLES: Record<
 
 // User voice-option phrases layered onto the personality defaults.
 const VOICE_PITCH_PHRASES: Record<Exclude<VoicePitch, 'default'>, string> = {
-  very_low: 'very deep, low-pitched',
-  low: 'low-pitched',
-  high: 'slightly high-pitched',
-  very_high: 'high-pitched',
+  very_low: 'extremely deep, bass-heavy, very low-pitched',
+  low: 'noticeably deep, low-pitched',
+  high: 'noticeably high-pitched',
+  very_high: 'extremely high-pitched, bright, treble-heavy',
 };
 
 const VOICE_TEXTURE_PHRASES: Record<Exclude<VoiceTexture, 'default'>, string> = {
@@ -237,7 +237,13 @@ export interface PresenterVoiceOptions {
 // the only thing keeping voice, framing, and background consistent across cuts.
 // Personality sets body language and the default voice; user voice options
 // (pitch / texture / generational cadence) override or extend it.
-export function getPresenterScenePrompt(
+/**
+ * Compact description of the presenter's voice — the personality's defaults
+ * overridden/extended by the user's voice options. Used mid-prompt in the
+ * scene description AND repeated at the very end of every segment prompt,
+ * because Veo weights the prompt edges most heavily.
+ */
+export function getPresenterVoiceSpec(
   personality: PresenterPersonality = 'social',
   voice: PresenterVoiceOptions = {},
 ): string {
@@ -257,9 +263,18 @@ export function getPresenterScenePrompt(
       : '';
 
   const article = /^[aeiou]/i.test(style.tone) ? 'an' : 'a';
+  return `${article} ${style.tone}, ${pitch} adult voice${texture}, ${style.delivery}${accent}${age}`;
+}
+
+export function getPresenterScenePrompt(
+  personality: PresenterPersonality = 'social',
+  voice: PresenterVoiceOptions = {},
+): string {
+  const style = PERSONALITY_STYLES[personality] || PERSONALITY_STYLES.social;
+
   const voiceSentence =
     `The person speaks in the exact same voice and the exact same accent in every clip: ` +
-    `${article} ${style.tone}, ${pitch} adult voice${texture}, ${style.delivery}${accent}${age}. ` +
+    `${getPresenterVoiceSpec(personality, voice)}. ` +
     `The voice and accent are perfectly identical and consistent from clip to clip — never shifting in accent, pitch, or character.`;
 
   return (
@@ -327,6 +342,35 @@ const PRESENTER_FALLBACK_SCENE =
   'A static locked-off shot of a blank bright green chroma key screen background (#00FF00). ' +
   'No movement, no people, no objects, no transitions. ' +
   'Absolute complete silence. No sound, no background noise, no ambient audio, no voice, no music, no sound effects.';
+
+// ---------------------------------------------------------------------------
+// Pipeline cancellation
+// ---------------------------------------------------------------------------
+
+// Clips whose in-flight pipeline was asked to stop. The pipeline checks the
+// set between steps and segments — the Veo call already running completes,
+// then the pipeline aborts without touching the clip again.
+const cancelledClips = new Set<string>();
+
+class PipelineCancelledError extends Error {
+  constructor() {
+    super('Generation stopped by user');
+    this.name = 'PipelineCancelledError';
+  }
+}
+
+function throwIfCancelled(clipId: string): void {
+  if (cancelledClips.has(clipId)) throw new PipelineCancelledError();
+}
+
+const IN_FLIGHT_STATUSES: ClipStatus[] = [
+  'uploading',
+  'preparing_script',
+  'generating_video',
+  'generating_audio',
+  'generating_music',
+  'muxing',
+];
 
 export const apiRouter = Router();
 
@@ -505,7 +549,7 @@ apiRouter.post(
 
 // Delete an uploaded image file
 apiRouter.delete('/images/:filename', async (req: Request, res: Response) => {
-  const { filename } = req.params;
+  const filename = req.params.filename as string;
   // Security: prevent path traversal
   if (filename.includes('/') || filename.includes('\\') || filename === '..') {
     res.status(400).json({ error: 'Invalid filename' });
@@ -646,7 +690,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, voiceAge, voicePitch, voiceTexture, voiceAccent, existingImagePath } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, bookendImage, voiceAge, voicePitch, voiceTexture, voiceAccent, existingImagePath } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -693,6 +737,12 @@ apiRouter.post(
         length: parsedLength,
         ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
         crossfade: crossfade === 'true' || crossfade === true,
+        // Presenter mode only: every segment opens/closes on the face photo,
+        // so the stitched cuts land on identical frames and look seamless.
+        // Story mode scenes move between different images/environments, so
+        // bookending doesn't apply there.
+        bookendImage:
+          mode === 'presenter' && (bookendImage === 'true' || bookendImage === true),
         mode: mode === 'presenter' ? 'presenter' : 'story',
         presenterPersonality: (mode === 'presenter' && presenterPersonality) ? presenterPersonality as PresenterPersonality : undefined,
         presenterStyle: (mode === 'presenter' && presenterStyle) ? presenterStyle as PresenterStyle : undefined,
@@ -741,6 +791,12 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         style: clip.presenterStyle,
       });
 
+      if (cancelledClips.has(clip.id)) {
+        cancelledClips.delete(clip.id);
+        res.status(409).json({ error: 'Generation stopped by user' });
+        return;
+      }
+
       const scenePrompt = getPresenterScenePrompt(clip.presenterPersonality, clipVoiceOptions(clip));
       updateClip(clip.id, {
         narrationScript: presenterResult.narrationScript,
@@ -757,6 +813,12 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         targetSeconds: clip.length,
         segmentCount,
       });
+
+      if (cancelledClips.has(clip.id)) {
+        cancelledClips.delete(clip.id);
+        res.status(409).json({ error: 'Generation stopped by user' });
+        return;
+      }
 
       updateClip(clip.id, {
         narrationScript: story.narrationScript,
@@ -791,7 +853,7 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   // If the user sent an edited narrationScript, musicPrompt, or crossfade
   // setting, store them before launching. The crossfade checkbox can be
   // toggled after the clip was created, so the generate-time value wins.
-  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride, voiceAccent: voiceAccentOverride } = req.body ?? {};
+  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, bookendImage: bookendOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride, voiceAccent: voiceAccentOverride } = req.body ?? {};
   if (narrationOverride && typeof narrationOverride === 'string') {
     updateClip(clip.id, { narrationScript: narrationOverride });
   }
@@ -804,6 +866,9 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   if (typeof continuityOverride === 'boolean') {
     updateClip(clip.id, { ensureContinuity: continuityOverride });
   }
+  if (typeof bookendOverride === 'boolean' && clip.mode === 'presenter') {
+    updateClip(clip.id, { bookendImage: bookendOverride });
+  }
   if (clip.mode === 'presenter' && (voiceAgeOverride || voicePitchOverride || voiceTextureOverride || voiceAccentOverride)) {
     updateClip(clip.id, {
       voiceAge: parseVoiceOption<VoiceAge>(voiceAgeOverride, VOICE_AGE_PHRASES),
@@ -813,6 +878,9 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
     });
   }
 
+  // A fresh generate clears any stale cancel request (e.g. retry after stop)
+  cancelledClips.delete(clip.id);
+
   // Return immediately
   res.status(202).json({ message: 'Generation started', clipId: clip.id });
 
@@ -820,6 +888,30 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   runPipeline(clip.id).catch((err) => {
     console.error(`[pipeline] Fatal error for clip ${clip.id}:`, err);
   });
+});
+
+// Stop a running generation. The clip is marked as errored immediately so
+// the UI can react; the pipeline aborts at its next checkpoint (the Veo call
+// already in flight finishes and is discarded).
+apiRouter.post('/clips/:id/cancel', (req: Request, res: Response) => {
+  const clip = getClip(req.params.id as string);
+  if (!clip) {
+    res.status(404).json({ error: 'Clip not found' });
+    return;
+  }
+  if (!IN_FLIGHT_STATUSES.includes(clip.status)) {
+    res.status(409).json({ error: `Clip is ${clip.status} — nothing to stop` });
+    return;
+  }
+
+  cancelledClips.add(clip.id);
+  const updated = updateClip(clip.id, {
+    status: 'error',
+    error: 'Generation stopped by user',
+    currentSegment: undefined,
+  });
+  console.log(`[api] Cancel requested for clip ${clip.id}`);
+  res.json(updated);
 });
 
 // SSE endpoint for real-time clip status updates
@@ -997,6 +1089,8 @@ async function runPipeline(clipId: string): Promise<void> {
       });
     }
 
+    throwIfCancelled(clipId);
+
     // ── Step 1.5: Green-screen the reference images (presenter only) ──
     // Presenter mode needs a chroma-key background, and Veo image-to-video
     // keeps the seed image's background — so presenter seeds must be
@@ -1044,6 +1138,10 @@ async function runPipeline(clipId: string): Promise<void> {
           ? storedSegments
           : splitNarrationBySentence(story.narrationScript, segmentCount);
 
+      // Repeat the voice spec as the final sentence of every segment prompt —
+      // Veo weights the prompt edges most heavily, and buried mid-prompt the
+      // user's pitch/texture/accent choices were often ignored.
+      const voiceSpec = getPresenterVoiceSpec(clip.presenterPersonality, clipVoiceOptions(clip));
       for (let i = 0; i < Math.min(story.scenes.length, segmentCount); i++) {
         // If we have text for this segment, use it; otherwise repeat the last chunk
         const segText = segmentTexts[i] || segmentTexts[segmentTexts.length - 1] || story.narrationScript;
@@ -1051,7 +1149,8 @@ async function runPipeline(clipId: string): Promise<void> {
           prompt:
             getPresenterScenePrompt(clip.presenterPersonality, clipVoiceOptions(clip)) +
             ` The person says out loud: "${segText}"` +
-            ' This spoken voice is the ONLY audio — no background music, no laughter, no other voices, no sounds of any kind anywhere in the clip.',
+            ' This spoken voice is the ONLY audio — no background music, no laughter, no other voices, no sounds of any kind anywhere in the clip.' +
+            ` CRITICAL: the person's voice is ${voiceSpec} — this exact voice, and no other, in every clip.`,
         };
       }
       console.log(
@@ -1071,11 +1170,31 @@ async function runPipeline(clipId: string): Promise<void> {
     const useContinuity = clip.ensureContinuity || clip.mode === 'presenter';
     const negativePrompt = clip.mode === 'presenter' ? PRESENTER_NEGATIVE_PROMPT : NEGATIVE_PROMPT;
 
+    // Bookend (presenter mode only): every segment interpolates back to the
+    // (green-screened) presenter photo, so each 8s clip starts AND ends on
+    // the exact same frame — stitched cuts then look seamless. Story mode
+    // scenes flow between different images, so bookending doesn't apply.
+    const bookendPath =
+      clip.mode === 'presenter' && clip.bookendImage && seedImagePaths.length > 0
+        ? seedImagePaths[0]
+        : null;
+    if (bookendPath) {
+      console.log(`[pipeline] Bookend enabled: every segment ends on ${bookendPath}`);
+    }
+
+    // Surfaces Veo retry backoff (high-demand errors) on the clip so the UI
+    // can show it; cleared when the segment eventually succeeds.
+    const segmentStatus = (seg: number) => (message: string | null) =>
+      updateClip(clipId, {
+        statusMessage: message ? `Segment ${seg + 1}/${segmentCount}: ${message}` : undefined,
+      });
+
     if (useContinuity) {
       console.log(`[pipeline] Generating segments sequentially with continuity chaining`);
       let chainedSeedPath: string | null = null;
 
       for (let seg = 0; seg < Math.min(story.scenes.length, segmentCount); seg++) {
+        throwIfCancelled(clipId);
         updateClip(clipId, { currentSegment: seg + 1 });
         console.log(
           `[pipeline] Generating segment ${seg + 1}/${segmentCount} sequentially for clip ${clipId}`,
@@ -1083,17 +1202,21 @@ async function runPipeline(clipId: string): Promise<void> {
 
         // A user image assigned to this slot wins over the chained frame
         const seedImagePath = seedAssignments.get(seg) ?? chainedSeedPath;
+        // Interpolation requires a first frame alongside the last frame
+        const lastFrameImagePath = bookendPath && seedImagePath ? bookendPath : null;
         const scenePrompt = story.scenes[seg].prompt;
         let segVideoPath: string;
 
         try {
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
+            lastFrameImagePath,
             prompt: scenePrompt,
             negativePrompt,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
+            onStatus: segmentStatus(seg),
           });
         } catch (err) {
           if (!(err instanceof VideoFilteredError)) throw err;
@@ -1102,11 +1225,13 @@ async function runPipeline(clipId: string): Promise<void> {
           );
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
+            lastFrameImagePath,
             prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + SCENE_STYLE_SUFFIX,
             negativePrompt,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
+            onStatus: segmentStatus(seg),
           });
         }
 
@@ -1149,6 +1274,7 @@ async function runPipeline(clipId: string): Promise<void> {
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
+              onStatus: segmentStatus(seg),
             });
           } catch (err) {
             if (!(err instanceof VideoFilteredError)) throw err;
@@ -1162,6 +1288,7 @@ async function runPipeline(clipId: string): Promise<void> {
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
+              onStatus: segmentStatus(seg),
             });
           }
 
@@ -1178,6 +1305,8 @@ async function runPipeline(clipId: string): Promise<void> {
       segmentPaths.push(...results.map((r) => r.path));
     }
 
+    throwIfCancelled(clipId);
+
     // Join segments if we have more than one — crossfade or hard cuts
     let videoPath: string;
     if (segmentPaths.length > 1) {
@@ -1189,7 +1318,7 @@ async function runPipeline(clipId: string): Promise<void> {
     }
 
     // Save videoPath on the clip and clear segment counter
-    updateClip(clipId, { videoPath, currentSegment: undefined });
+    updateClip(clipId, { videoPath, currentSegment: undefined, statusMessage: undefined });
 
     // For presenter mode, the Veo video already contains speech — skip TTS/music/mux.
     // Veo sometimes bakes music/laughter into the audio despite the prompts, so
@@ -1214,6 +1343,7 @@ async function runPipeline(clipId: string): Promise<void> {
           `[pipeline] Speech isolation failed (non-fatal): ${(err as Error).message}`,
         );
       }
+      throwIfCancelled(clipId);
       updateClip(clipId, { finalPath, status: 'complete' });
       console.log(`[pipeline] Clip ${clipId} complete!`);
       return;
@@ -1223,6 +1353,7 @@ async function runPipeline(clipId: string): Promise<void> {
     const narrationEnabled = clip.enableNarration !== false;
 
     if (narrationEnabled) {
+      throwIfCancelled(clipId);
       updateClip(clipId, { status: 'generating_audio' });
       console.log(`[pipeline] Video done, generating narration audio for clip ${clipId}`);
 
@@ -1243,6 +1374,7 @@ async function runPipeline(clipId: string): Promise<void> {
     // ── Step 4: Background music (best-effort) ────────────────────────
     let backgroundMusicPath: string | null = null;
     if (clip.enableMusic) {
+      throwIfCancelled(clipId);
       updateClip(clipId, { status: 'generating_music' });
       console.log(`[pipeline] Generating background music for clip ${clipId}`);
 
@@ -1262,6 +1394,7 @@ async function runPipeline(clipId: string): Promise<void> {
     }
 
     // ── Step 5: Mux video + narration + music ─────────────────────────
+    throwIfCancelled(clipId);
     updateClip(clipId, { status: 'muxing' });
     console.log(`[pipeline] Muxing for clip ${clipId}${backgroundMusicPath ? ' (with background music)' : ''}`);
 
@@ -1273,11 +1406,20 @@ async function runPipeline(clipId: string): Promise<void> {
       clipId,
     });
 
+    throwIfCancelled(clipId);
     updateClip(clipId, { finalPath, status: 'complete' });
     console.log(`[pipeline] Clip ${clipId} complete!`);
   } catch (err) {
+    // A cancelled clip was already marked as errored by the cancel endpoint —
+    // don't overwrite it, and swallow whatever error the abort surfaced as.
+    if (err instanceof PipelineCancelledError || cancelledClips.has(clipId)) {
+      console.log(`[pipeline] Clip ${clipId} stopped by user`);
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[pipeline] Error for clip ${clipId}:`, message);
-    updateClip(clipId, { status: 'error', error: message });
+    updateClip(clipId, { status: 'error', error: message, statusMessage: undefined });
+  } finally {
+    cancelledClips.delete(clipId);
   }
 }

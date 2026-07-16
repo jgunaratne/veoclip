@@ -18,16 +18,31 @@ export class VideoFilteredError extends Error {
 // Vertex AI implementation
 // ---------------------------------------------------------------------------
 
-async function generateVideoVertex(opts: {
-  imageBase64: string | null;
+interface EncodedImage {
+  bytesBase64Encoded: string;
   mimeType: string;
+}
+
+async function encodeImage(imagePath: string): Promise<EncodedImage> {
+  const buffer = await fs.readFile(imagePath);
+  let mimeType = 'image/jpeg';
+  if (imagePath.endsWith('.png')) mimeType = 'image/png';
+  else if (imagePath.endsWith('.webp')) mimeType = 'image/webp';
+  return { bytesBase64Encoded: buffer.toString('base64'), mimeType };
+}
+
+interface GenerateOpts {
+  image: EncodedImage | null;
+  lastFrame: EncodedImage | null;
   prompt: string;
   negativePrompt?: string;
   duration: number;
   outputDir: string;
   clipId: string;
-}): Promise<string> {
-  const { imageBase64, mimeType, prompt, negativePrompt, duration, outputDir, clipId } = opts;
+}
+
+async function generateVideoVertex(opts: GenerateOpts): Promise<string> {
+  const { image, lastFrame, prompt, negativePrompt, duration, outputDir, clipId } = opts;
 
   const projectId = process.env.GCP_PROJECT_ID!;
   const location = process.env.GCP_LOCATION || 'us-central1';
@@ -40,12 +55,9 @@ async function generateVideoVertex(opts: {
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const instance: Record<string, any> = { prompt };
-  if (imageBase64) {
-    instance.image = {
-      bytesBase64Encoded: imageBase64,
-      mimeType,
-    };
-  }
+  if (image) instance.image = image;
+  // Interpolation: the model generates motion that lands exactly on this frame
+  if (lastFrame) instance.lastFrame = lastFrame;
 
   const body = {
     instances: [instance],
@@ -191,16 +203,8 @@ async function generateVideoVertex(opts: {
 // Gemini API implementation
 // ---------------------------------------------------------------------------
 
-async function generateVideoGemini(opts: {
-  imageBase64: string | null;
-  mimeType: string;
-  prompt: string;
-  negativePrompt?: string;
-  duration: number;
-  outputDir: string;
-  clipId: string;
-}): Promise<string> {
-  const { imageBase64, mimeType, prompt, negativePrompt, duration, outputDir, clipId } = opts;
+async function generateVideoGemini(opts: GenerateOpts): Promise<string> {
+  const { image, lastFrame, prompt, negativePrompt, duration, outputDir, clipId } = opts;
 
   const apiKey = process.env.GEMINI_API_KEY!;
   const model = process.env.VEO_MODEL || 'veo-3.1-fast-generate-preview';
@@ -212,12 +216,9 @@ async function generateVideoGemini(opts: {
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const instance: Record<string, any> = { prompt };
-  if (imageBase64) {
-    instance.image = {
-      bytesBase64Encoded: imageBase64,
-      mimeType,
-    };
-  }
+  if (image) instance.image = image;
+  // Interpolation: the model generates motion that lands exactly on this frame
+  if (lastFrame) instance.lastFrame = lastFrame;
 
   const body = {
     instances: [instance],
@@ -348,7 +349,9 @@ async function generateVideoGemini(opts: {
 
 /**
  * Generate a video segment using Veo. The seed image is optional — segments
- * without one are generated from the prompt alone.
+ * without one are generated from the prompt alone. An optional last-frame
+ * image makes Veo interpolate the motion so the segment ends exactly on that
+ * frame (supported by veo-2.0 and veo-3.1 models).
  *
  * Automatically selects the auth strategy based on environment variables:
  *   - GEMINI_API_KEY  → Gemini API (uses the API key directly; latest models)
@@ -358,38 +361,40 @@ async function generateVideoGemini(opts: {
  */
 export async function generateVideo(opts: {
   imagePath: string | null;
+  lastFrameImagePath?: string | null;
   prompt: string;
   negativePrompt?: string;
   duration: number;
   outputDir: string;
   clipId: string;
+  /** Called with a human-readable note while waiting out a retry, and with
+   *  null once generation succeeds — lets callers surface backoff in the UI. */
+  onStatus?: (message: string | null) => void;
 }): Promise<string> {
-  const { imagePath, prompt, negativePrompt, duration, outputDir, clipId } = opts;
+  const { imagePath, lastFrameImagePath, prompt, negativePrompt, duration, outputDir, clipId, onStatus } = opts;
 
-  let imageBase64: string | null = null;
-  let mimeType = 'image/jpeg';
-  if (imagePath) {
-    const imageBuffer = await fs.readFile(imagePath);
-    imageBase64 = imageBuffer.toString('base64');
-    if (imagePath.endsWith('.png')) mimeType = 'image/png';
-    else if (imagePath.endsWith('.webp')) mimeType = 'image/webp';
+  const image = imagePath ? await encodeImage(imagePath) : null;
+  const lastFrame = lastFrameImagePath ? await encodeImage(lastFrameImagePath) : null;
+  if (lastFrame) {
+    console.log(`[veo] Segment ${clipId} will end on last frame: ${lastFrameImagePath}`);
   }
 
   const mode = getAuthMode();
   console.log(`[veo] Using auth mode: ${mode}`);
 
-  const sharedOpts = { imageBase64, mimeType, prompt, negativePrompt, duration, outputDir, clipId };
+  const sharedOpts = { image, lastFrame, prompt, negativePrompt, duration, outputDir, clipId };
 
   const MAX_RETRIES = 3;
   const BACKOFF_SECONDS = [10, 20, 40];
 
   for (let attempt = 0; ; attempt++) {
     try {
-      if (mode === 'vertex') {
-        return await generateVideoVertex(sharedOpts);
-      } else {
-        return await generateVideoGemini(sharedOpts);
-      }
+      const videoPath =
+        mode === 'vertex'
+          ? await generateVideoVertex(sharedOpts)
+          : await generateVideoGemini(sharedOpts);
+      onStatus?.(null);
+      return videoPath;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const errObj = err as { code?: number };
@@ -401,6 +406,10 @@ export async function generateVideo(opts: {
         console.warn(
           `[veo] High demand error (attempt ${attempt + 1}/${MAX_RETRIES + 1}), ` +
             `retrying in ${waitSec}s: ${message}`,
+        );
+        onStatus?.(
+          `Veo is experiencing high demand — retrying in ${waitSec}s ` +
+            `(attempt ${attempt + 1} of ${MAX_RETRIES + 1})`,
         );
         await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
         continue;
