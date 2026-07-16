@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import Navbar from "../components/Navbar";
+
 import ImageUpload from "../components/ImageUpload";
 import PromptInput from "../components/PromptInput";
 import VoiceSelector from "../components/VoiceSelector";
@@ -312,7 +312,6 @@ export default function CreatePage() {
 
   return (
     <>
-      <Navbar />
       <main className={styles.main}>
         <div className={styles.header}>
           <h1 className={styles.title}>Create a Story Video</h1>
@@ -323,158 +322,162 @@ export default function CreatePage() {
         </div>
 
         <div className={styles.grid}>
-          {/* Full-width status bar — spans all 3 columns */}
-          {clip && clip.status !== "idle" && clip.status !== "script_ready" && (
-            <div className={styles.statusBar}>
-              <StatusTracker
-                status={clip.status}
-                error={clip.error}
-                currentSegment={clip.currentSegment}
-                totalSegments={clip.totalSegments}
-                enableNarration={clip.enableNarration}
-                enableMusic={clip.enableMusic}
-                onRetry={handleRetry}
-              />
-            </div>
-          )}
-
-          {/* Column 1 — Images */}
+          {/* Left Column — Inputs & Settings */}
           <div className={styles.left}>
-            <ImageUpload files={files} onFilesChange={setFiles} />
-          </div>
-
-          {/* Column 2 — Story text + controls */}
-          <div className={styles.middle}>
-            <PromptInput
-              label="Story Text"
-              value={storyText}
-              onChange={setStoryText}
-              placeholder="Paste the text your story should be based on — an article, notes, a chapter… The AI writes the narration and scenes from it."
-              maxLength={100000}
-              rows={20}
-            />
-
-            <div className={styles.settings}>
-              <DurationPicker value={length} onChange={setLength} />
-              {enableNarration && <VoiceSelector value={voice} onChange={setVoice} />}
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>1. Media & Story</h2>
+              <ImageUpload files={files} onFilesChange={setFiles} />
+              <PromptInput
+                label="Story Text"
+                value={storyText}
+                onChange={setStoryText}
+                placeholder="Paste the text your story should be based on — an article, notes, a chapter… The AI writes the narration and scenes from it."
+                maxLength={100000}
+                rows={12}
+              />
             </div>
 
-            <CheckboxInput
-              label="Add voiceover narration"
-              description="Generates custom spoken narration text-to-speech drawn from the story."
-              value={enableNarration}
-              onChange={(checked) => setEnableNarration(checked)}
-            />
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>2. Generation Settings</h2>
+              <div className={styles.settings}>
+                <DurationPicker value={length} onChange={setLength} />
+                {enableNarration && <VoiceSelector value={voice} onChange={setVoice} />}
+              </div>
 
-            {enableNarration && (
-              <>
-                <CheckboxInput
-                  label="Use custom character voice"
-                  description="Give the narrator a distinct persona — tone, pacing, and personality."
-                  value={useCustomVoice}
-                  onChange={(checked) => setUseCustomVoice(checked)}
-                />
+              <CheckboxInput
+                label="Add voiceover narration"
+                description="Generates custom spoken narration text-to-speech drawn from the story."
+                value={enableNarration}
+                onChange={(checked) => setEnableNarration(checked)}
+              />
 
-                {useCustomVoice && (
-                  <div className={styles.characterSection}>
-                    <PromptInput
-                      label={isCharacterSuggesting ? "Narrator Character — generating…" : "Narrator Character"}
-                      value={characterProfile}
-                      onChange={setCharacterProfile}
-                      placeholder="Describe the narrator's persona — e.g. 'A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency'."
-                      maxLength={2000}
-                      rows={3}
-                    />
-                    <Button
-                      variant="secondary"
-                      label={isCharacterSuggesting ? "Generating…" : "✨ Auto-generate from text"}
-                      isDisabled={!storyText.trim() || isCharacterSuggesting}
-                      clickAction={handleSuggestCharacter}
-                    />
-                  </div>
-                )}
-              </>
-            )}
+              {enableNarration && (
+                <>
+                  <CheckboxInput
+                    label="Use custom character voice"
+                    description="Give the narrator a distinct persona — tone, pacing, and personality."
+                    value={useCustomVoice}
+                    onChange={(checked) => setUseCustomVoice(checked)}
+                  />
 
-            <CheckboxInput
-              label="Ensure visual continuity between scenes"
-              description="Tightly links visual flow between scenes (generates sequentially, takes 10-20 minutes). If disabled, scenes generate in parallel (takes ~2 minutes)."
-              value={ensureContinuity}
-              onChange={(checked) => setEnsureContinuity(checked)}
-            />
+                  {useCustomVoice && (
+                    <div className={styles.characterSection}>
+                      <PromptInput
+                        label={isCharacterSuggesting ? "Narrator Character — generating…" : "Narrator Character"}
+                        value={characterProfile}
+                        onChange={setCharacterProfile}
+                        placeholder="Describe the narrator's persona — e.g. 'A grizzled war correspondent with decades of field experience, speaking with gravitas and urgency'."
+                        maxLength={2000}
+                        rows={3}
+                      />
+                      <Button
+                        variant="secondary"
+                        label={isCharacterSuggesting ? "Generating…" : "✨ Auto-generate from text"}
+                        isDisabled={!storyText.trim() || isCharacterSuggesting}
+                        clickAction={handleSuggestCharacter}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
 
-            <CheckboxInput
-              label="Add background music"
-              description="Generates a soft, atmospheric instrumental score via Lyria 3 and mixes it under the narration."
-              value={enableMusic}
-              onChange={(checked) => setEnableMusic(checked)}
-            />
+              <CheckboxInput
+                label="Ensure visual continuity between scenes"
+                description="Tightly links visual flow between scenes (generates sequentially, takes 10-20 minutes). If disabled, scenes generate in parallel (takes ~2 minutes)."
+                value={ensureContinuity}
+                onChange={(checked) => setEnsureContinuity(checked)}
+              />
 
-            {enableMusic && (
-              <div className={styles.characterSection}>
-                <PromptInput
-                  label={isMusicPromptSuggesting ? "Music Prompt — generating…" : "Music Prompt"}
-                  value={musicPrompt}
-                  onChange={setMusicPrompt}
-                  placeholder="Describe the mood and style of background music — e.g. 'Warm, nostalgic acoustic guitar with soft strings, evoking a sunset road trip'"
-                  maxLength={2000}
-                  rows={2}
-                />
+              <CheckboxInput
+                label="Add background music"
+                description="Generates a soft, atmospheric instrumental score via Lyria 3 and mixes it under the narration."
+                value={enableMusic}
+                onChange={(checked) => setEnableMusic(checked)}
+              />
+
+              {enableMusic && (
+                <div className={styles.characterSection}>
+                  <PromptInput
+                    label={isMusicPromptSuggesting ? "Music Prompt — generating…" : "Music Prompt"}
+                    value={musicPrompt}
+                    onChange={setMusicPrompt}
+                    placeholder="Describe the mood and style of background music — e.g. 'Warm, nostalgic acoustic guitar with soft strings, evoking a sunset road trip'"
+                    maxLength={2000}
+                    rows={2}
+                  />
+                  <Button
+                    variant="secondary"
+                    label={isMusicPromptSuggesting ? "Generating…" : "✨ Auto-generate from text"}
+                    isDisabled={!storyText.trim() || isMusicPromptSuggesting}
+                    clickAction={handleSuggestMusicPrompt}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>3. Generate</h2>
+              {editedNarration && (
+                <div className={styles.scriptPreview}>
+                  <label>Narration Script</label>
+                  <textarea
+                    value={editedNarration}
+                    onChange={(e) => setEditedNarration(e.target.value)}
+                    readOnly={clip?.status !== "script_ready"}
+                  />
+                </div>
+              )}
+
+              {clip?.status === "script_ready" ? (
                 <Button
-                  variant="secondary"
-                  label={isMusicPromptSuggesting ? "Generating…" : "✨ Auto-generate from text"}
-                  isDisabled={!storyText.trim() || isMusicPromptSuggesting}
-                  clickAction={handleSuggestMusicPrompt}
+                  variant="primary"
+                  size="lg"
+                  label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
+                  isDisabled={!canGenerateVideo}
+                  clickAction={handleGenerateVideo}
                 />
-              </div>
-            )}
-
-            {editedNarration && (
-              <div className={styles.scriptPreview}>
-                <label>Narration Script</label>
-                <textarea
-                  value={editedNarration}
-                  onChange={(e) => setEditedNarration(e.target.value)}
-                  readOnly={clip?.status !== "script_ready"}
+              ) : (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  label={
+                    isSubmitting
+                      ? "Submitting…"
+                      : isGenerating
+                        ? "⏳ Generating…"
+                        : "✨ Generate Script"
+                  }
+                  isDisabled={!canGenerateScript}
+                  clickAction={handleGenerateScript}
                 />
-              </div>
-            )}
+              )}
 
-            {clip?.status === "script_ready" ? (
-              <Button
-                variant="primary"
-                size="lg"
-                label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
-                isDisabled={!canGenerateVideo}
-                clickAction={handleGenerateVideo}
-              />
-            ) : (
-              <Button
-                variant="primary"
-                size="lg"
-                label={
-                  isSubmitting
-                    ? "Submitting…"
-                    : isGenerating
-                      ? "⏳ Generating…"
-                      : "✨ Generate Script"
-                }
-                isDisabled={!canGenerateScript}
-                clickAction={handleGenerateScript}
-              />
-            )}
-
-            {/* Inline error banner */}
-            {clip?.status === "error" && clip.error && (
-              <Banner status="error" title="Generation failed" onDismiss={() => setClip(null)}>
-                {clip.error}
-              </Banner>
-            )}
+              {/* Inline error banner */}
+              {clip?.status === "error" && clip.error && (
+                <Banner status="error" title="Generation failed" onDismiss={() => setClip(null)}>
+                  {clip.error}
+                </Banner>
+              )}
+            </div>
           </div>
 
-          {/* Column 3 — Video (shown when complete) */}
+          {/* Right Column — Stage */}
           <div className={styles.right}>
-            {clip?.status === "complete" && finalVideoUrl && (
+            {clip && clip.status !== "idle" && clip.status !== "script_ready" && (
+              <div className={styles.statusBar}>
+                <StatusTracker
+                  status={clip.status}
+                  error={clip.error}
+                  currentSegment={clip.currentSegment}
+                  totalSegments={clip.totalSegments}
+                  enableNarration={clip.enableNarration}
+                  enableMusic={clip.enableMusic}
+                  onRetry={handleRetry}
+                />
+              </div>
+            )}
+
+            {clip?.status === "complete" && finalVideoUrl ? (
               <div className={styles.resultSection}>
                 <VideoPlayer src={finalVideoUrl} />
                 <a
@@ -498,6 +501,12 @@ export default function CreatePage() {
                     />
                   </div>
                 )}
+              </div>
+            ) : (!clip || clip.status === "idle" || clip.status === "script_ready") && (
+              <div className={styles.emptyState}>
+                <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🎥</div>
+                <h3>Your Studio Awaits</h3>
+                <p>Upload media, write your story, and generate magic.</p>
               </div>
             )}
           </div>
