@@ -23,6 +23,7 @@ type ClipStatus =
 interface StatusTrackerProps {
   status: ClipStatus;
   error?: string;
+  statusMessage?: string;
   currentSegment?: number;
   totalSegments?: number;
   enableNarration?: boolean;
@@ -130,6 +131,7 @@ function formatTime(seconds: number): string {
 export default function StatusTracker({
   status,
   error,
+  statusMessage,
   currentSegment,
   totalSegments,
   enableNarration,
@@ -187,6 +189,11 @@ export default function StatusTracker({
               variant={status === "complete" ? "success" : "accent"}
             />
           </div>
+
+          {/* Transient backend note, e.g. Veo high-demand retry backoff */}
+          {statusMessage && !isTerminal && (
+            <Banner status="warning" title={statusMessage} />
+          )}
 
           {/* Step indicators */}
           <div className={styles.steps}>

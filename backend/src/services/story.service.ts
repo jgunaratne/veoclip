@@ -9,6 +9,23 @@ export interface StoryScript {
   caption: string;
 }
 
+// How much of the pasted source text the script prompts get to see. Longer
+// excerpts give the model more concrete material to draw specifics from.
+const SOURCE_TEXT_LIMIT = 16000;
+
+// Shared anti-generic instructions — every script must be anchored in the
+// source text's own specifics, not interchangeable stock phrasing.
+const SPECIFICITY_RULES = `- Anchor the script in this source text's OWN specifics: use the actual names, places, dates, \
+numbers, terms, and direct details it contains. A viewer should be able to tell exactly which text this was written from.
+- Favor the source's distinctive, lesser-known details — the odd number, the minor figure, the surprising aside — \
+over the obvious headline facts a generic summary would lead with.
+- The uniqueness test: if a sentence could appear unchanged in a video about a different subject, rewrite it. \
+Ban stock filler such as "rich history", "hidden gem", "stands as a testament", "a journey through time", \
+"stunning", "breathtaking", "nestled in", "steeped in tradition".
+- Never spend words on content-free filler or throat-clearing — "here's the thing", "think of it this way", \
+"let me tell you", "what this means is", "at the end of the day", "the crazy part is". Every one of those \
+phrases is airtime stolen from the source material; replace it with an actual fact or detail from the text.`;
+
 function mimeTypeFor(imagePath: string): string {
   const ext = path.extname(imagePath).toLowerCase();
   if (ext === '.png') return 'image/png';
@@ -48,7 +65,8 @@ export async function generateStory(opts: {
 informative, objective, and realistic story drawn from the source text, mimicking the style of a serious \
 journalistic, educational, or historical documentary (e.g., PBS Frontline or BBC Horizon).
 - Do NOT use generic intro/outro phrases, promotional hooks, or cinematic cliches (e.g., "Join us...", "In this video...", "Discover the secrets of...", "Let's explore...").
-- Prefer to convey concrete information, key facts, specific dates, names of real people, places, or organizations, and actual statistics/numbers from the source text.
+${SPECIFICITY_RULES}
+- Nearly every sentence should carry at least one concrete fact, name, number, or detail taken from the source text.
 - Prioritize accuracy, objectivity, and informativeness over dramatic narrative or creative embellishment. Avoid vague summaries or simplifying details.
 - CRITICAL: The narration will be read aloud by a text-to-speech model with strict content filters. \
 The script MUST NOT mention: alcohol, alcoholism, drugs, drinking, drunkenness, guns, firearms, weapons, \
@@ -65,6 +83,10 @@ symbolic and family-friendly — avoid violence, weapons, suffering.
 - CRITICAL: Describe rich, fully realized environments — settings, backgrounds, lighting, \
 and atmosphere all matter. When reference images are attached, preserve their settings, \
 subjects, and visual elements in the corresponding scenes rather than replacing them.
+- Ground every scene in the specific objects, places, era, architecture, tools, materials, \
+weather, and imagery the source text actually mentions — not interchangeable stock footage \
+concepts. If the text names a rusting fishing trawler in a Baltic harbor, show that, not \
+"a boat on the water".
 - CRITICAL: Each scene must be ONE single continuous shot with no cuts, no transitions, \
 no fades, no dissolves, and no scene changes within the segment. While avoiding identifiable real or historical people in the prompts to pass \
 video safety filters, describe stylized representations or visually abstract depictions of the events/concepts \
@@ -75,7 +97,7 @@ informative, and include 3-5 relevant hashtags. Do NOT use generic hashtags like
 topic-specific ones drawn from the content.
 
 Source text:
-${storyText.slice(0, 6000)}
+${storyText.slice(0, SOURCE_TEXT_LIMIT)}
 
 Return ONLY valid JSON (no markdown fences) with this structure:
 {
@@ -252,10 +274,10 @@ export async function generatePresenterScript(opts: {
   const personalityPrompts: Record<string, string> = {
     social:
       `Super casual and conversational — like someone filming themselves on their phone.\n` +
-      `Use short punchy sentences, natural pauses, and direct address ("you", "look", "okay so").\n` +
-      `Engaging and hook-driven — the first part should start with something attention-grabbing.\n` +
+      `Use short punchy sentences and direct address ("you").\n` +
+      `Engaging and hook-driven — the first part should open with a striking specific fact from the source, not a generic teaser.\n` +
       `Informative but not stiff — explain things simply like talking to a friend.\n` +
-      `Feel free to use filler words sparingly for authenticity ("like", "honestly", "basically").`,
+      `The casual feel must come from rhythm and word choice, never from filler words ("like", "honestly", "basically", "okay so") — those waste airtime that belongs to the source content.`,
     calm:
       `Calm, measured, and soothing — like a meditation guide or a thoughtful late-night radio host.\n` +
       `Use flowing, unhurried sentences with gentle transitions.\n` +
@@ -326,15 +348,15 @@ export async function generatePresenterScript(opts: {
       `The viewer should feel informed and trust the presenter as a credible source.`,
     educational:
       `Frame this as a teaching moment or explainer. The presenter is helping the viewer understand something.\n` +
-      `Build from simple concepts to more complex ones. Use analogies and examples.\n` +
+      `Build from simple concepts to more complex ones, using the source text's own examples and terms.\n` +
       `Anticipate viewer confusion — address "why" and "how", not just "what".\n` +
-      `Use phrases like "here's the thing", "think of it this way", "what this means is".\n` +
+      `Teach directly with facts — no teaching-cliché setups like "here's the thing", "think of it this way", or "what this means is".\n` +
       `The viewer should walk away feeling like they genuinely learned something new.`,
     storytelling:
       `Frame this as a third-person narrative story. The presenter is a storyteller weaving a tale.\n` +
       `Use narrative arc: set the scene, introduce characters/events, build tension, deliver a resolution.\n` +
-      `Paint vivid pictures with descriptive language. Make the viewer see and feel the story.\n` +
-      `Use transitions like "and then", "but what nobody expected was", "that's when everything changed".\n` +
+      `Paint vivid pictures using the source's own concrete details — its places, names, and moments — not generic description.\n` +
+      `Let tension come from the actual events, not from canned transitions like "but what nobody expected was" or "that's when everything changed".\n` +
       `The viewer should feel drawn into a compelling narrative, not just receiving information.`,
     review:
       `Frame this as a review or evaluation. The presenter is sharing their honest take on something.\n` +
@@ -364,6 +386,11 @@ The video is filmed as exactly ${segmentCount} consecutive 8-second clips. Given
 - Each part MUST be between 15 and 20 words. This matters: fewer than 15 words leaves dead air in the clip, more than 20 words gets cut off before the person finishes speaking.
 - Each part MUST consist only of complete sentences. A sentence must NEVER continue from one part into the next.
 - Together the parts must read as one flowing, continuous monologue — no per-part greetings or restarts.
+CONTENT SPECIFICITY:
+${SPECIFICITY_RULES}
+- Work a concrete name, number, or detail from the source text into almost every part. The framing and tone \
+shape HOW things are said — the substance must come from this specific source text, so no part could be \
+recycled for a different topic.
 DELIVERY TONE:
 - ${toneInstructions}
 - CRITICAL: The narration will be read aloud by a video model with strict content filters. \
@@ -376,7 +403,7 @@ informative, and include 3-5 relevant hashtags. Do NOT use generic hashtags like
 topic-specific ones drawn from the content.
 
 Source text:
-${storyText.slice(0, 6000)}
+${storyText.slice(0, SOURCE_TEXT_LIMIT)}
 
 Return ONLY valid JSON (no markdown fences) with this structure:
 {

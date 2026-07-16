@@ -67,6 +67,7 @@ export interface Clip {
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
   crossfade?: boolean; // crossfade between segments instead of hard cuts
+  bookendImage?: boolean; // open AND close the video on the first reference image
   mode?: 'story' | 'presenter' | 'composite';
   presenterPersonality?: PresenterPersonality;
   presenterStyle?: PresenterStyle;
@@ -85,6 +86,7 @@ export interface Clip {
   // Status
   status: ClipStatus;
   error?: string;
+  statusMessage?: string; // transient in-progress note (e.g. high-demand retry backoff)
   currentSegment?: number; // 1-based, while generating_video
   totalSegments?: number;
 

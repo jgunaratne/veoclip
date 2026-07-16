@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FileInput } from "@astryxdesign/core/FileInput";
 
+import { useClipTracker, isInFlight } from "../hooks/useClipTracker";
 import PromptInput from "../components/PromptInput";
 import DurationPicker from "../components/DurationPicker";
 import PersonalityPicker from "../components/PersonalityPicker";
@@ -34,6 +35,7 @@ interface Clip {
   id: string;
   status: ClipStatus;
   error?: string;
+  statusMessage?: string;
   narrationScript?: string;
   caption?: string;
   currentSegment?: number;
@@ -43,6 +45,19 @@ interface Clip {
   enableNarration?: boolean;
   enableMusic?: boolean;
   mode?: "story" | "presenter";
+  // Inputs echoed back by the backend — used to restore the form on resume
+  storyText?: string;
+  referenceImagePaths?: string[];
+  length?: number;
+  ensureContinuity?: boolean;
+  crossfade?: boolean;
+  bookendImage?: boolean;
+  presenterPersonality?: PresenterPersonality;
+  presenterStyle?: PresenterStyle;
+  voiceAge?: VoiceOptions["age"];
+  voicePitch?: VoiceOptions["pitch"];
+  voiceTexture?: VoiceOptions["texture"];
+  voiceAccent?: VoiceOptions["accent"];
 }
 
 async function getErrorMessage(res: Response): Promise<string> {
@@ -78,13 +93,44 @@ export default function PresenterModePage() {
   const [scriptStyle, setScriptStyle] = useState<PresenterStyle>("social_media");
   const [crossfade, setCrossfade] = useState(false);
   const [ensureContinuity, setEnsureContinuity] = useState(false);
+  const [bookendImage, setBookendImage] = useState(true);
   const [voiceOptions, setVoiceOptions] = useState<VoiceOptions>(DEFAULT_VOICE_OPTIONS);
 
-  // Generation state
-  const [clip, setClip] = useState<Clip | null>(null);
+  // Generation state — the tracker persists the active clip ID in
+  // localStorage and reattaches to the still-running backend pipeline after
+  // a page refresh or a closed browser tab.
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editedNarration, setEditedNarration] = useState("");
-  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const { clip, setClip, remember, watch, reset } = useClipTracker<Clip>(
+    "veoclip.activeClip.presenter",
+    (recovered) => {
+      // Restore the form so the user can edit/retry after a reload
+      if (recovered.storyText) setStoryText(recovered.storyText);
+      if (recovered.length) setLength(recovered.length);
+      if (recovered.presenterPersonality) setPersonality(recovered.presenterPersonality);
+      if (recovered.presenterStyle) setScriptStyle(recovered.presenterStyle);
+      if (recovered.ensureContinuity !== undefined) setEnsureContinuity(recovered.ensureContinuity);
+      if (recovered.crossfade !== undefined) setCrossfade(recovered.crossfade);
+      if (recovered.bookendImage !== undefined) setBookendImage(recovered.bookendImage);
+      const facePath = recovered.referenceImagePaths?.[0];
+      if (facePath) {
+        setSelectedPhoto({
+          url: `/uploads/${facePath.split("/").pop()}`,
+          path: facePath,
+          clipTitle: "",
+          createdAt: "",
+        });
+      }
+      setVoiceOptions({
+        age: recovered.voiceAge ?? DEFAULT_VOICE_OPTIONS.age,
+        pitch: recovered.voicePitch ?? DEFAULT_VOICE_OPTIONS.pitch,
+        texture: recovered.voiceTexture ?? DEFAULT_VOICE_OPTIONS.texture,
+        accent: recovered.voiceAccent ?? DEFAULT_VOICE_OPTIONS.accent,
+      });
+      setEditedNarration(recovered.narrationScript ?? "");
+    },
+  );
 
   useEffect(() => {
     // Load previously used presenter photos
@@ -93,33 +139,16 @@ export default function PresenterModePage() {
         if (res.ok) setPreviousPhotos(await res.json());
       })
       .catch(() => {});
-
-    return () => {
-      eventSourceRef.current?.close();
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
   }, []);
 
-  // Polling fallback
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const startPolling = useCallback((clipId: string) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/clips/${clipId}`);
-        if (!res.ok) return;
-        const updated: Clip = await res.json();
-        setClip(updated);
-        if (updated.status === "complete" || updated.status === "error") {
-          clearInterval(pollingRef.current!);
-          pollingRef.current = null;
-        }
-      } catch {
-        // Ignore
-      }
-    }, 3000);
-  }, []);
+  // If the script arrives via SSE (e.g. after resuming mid-preparation),
+  // load it into the editable textarea
+  useEffect(() => {
+    if (clip?.status === "script_ready" && clip.narrationScript && !editedNarration) {
+      setEditedNarration(clip.narrationScript);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clip?.status]);
 
   const handleGenerateScript = useCallback(async () => {
     if (!storyText.trim()) return;
@@ -142,6 +171,7 @@ export default function PresenterModePage() {
       formData.append("presenterPersonality", personality);
       formData.append("presenterStyle", scriptStyle);
       formData.append("crossfade", String(crossfade));
+      formData.append("bookendImage", String(bookendImage));
       formData.append("voiceAge", voiceOptions.age);
       formData.append("voicePitch", voiceOptions.pitch);
       formData.append("voiceTexture", voiceOptions.texture);
@@ -158,6 +188,8 @@ export default function PresenterModePage() {
       }
 
       const newClip: Clip = await createRes.json();
+      // Remember the clip so a page refresh can pick it back up
+      remember(newClip.id);
       setClip({ ...newClip, status: "preparing_script" });
 
       const scriptRes = await fetch(`/api/clips/${newClip.id}/script`, {
@@ -181,7 +213,7 @@ export default function PresenterModePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [faceFile, storyText, length, personality, scriptStyle, crossfade, ensureContinuity, voiceOptions]);
+  }, [faceFile, selectedPhoto, storyText, length, personality, scriptStyle, crossfade, ensureContinuity, bookendImage, voiceOptions, remember, setClip]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -195,6 +227,7 @@ export default function PresenterModePage() {
           narrationScript: editedNarration,
           crossfade,
           ensureContinuity,
+          bookendImage,
           voiceAge: voiceOptions.age,
           voicePitch: voiceOptions.pitch,
           voiceTexture: voiceOptions.texture,
@@ -209,28 +242,8 @@ export default function PresenterModePage() {
 
       setClip((prev) => prev ? { ...prev, status: "generating_video" } : prev);
 
-      eventSourceRef.current?.close();
-      const es = new EventSource(
-        `http://localhost:8080/api/clips/${clip.id}/events`,
-      );
-      eventSourceRef.current = es;
-
-      es.onmessage = (event) => {
-        try {
-          const updated: Clip = JSON.parse(event.data);
-          setClip(updated);
-          if (updated.status === "complete" || updated.status === "error") {
-            es.close();
-          }
-        } catch {
-          // Ignore
-        }
-      };
-
-      es.onerror = () => {
-        es.close();
-        startPolling(clip.id);
-      };
+      // Track live status (SSE with polling fallback, refresh-proof)
+      watch(clip.id);
     } catch (err) {
       setClip((prev) =>
         prev
@@ -240,14 +253,87 @@ export default function PresenterModePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [clip, editedNarration, crossfade, ensureContinuity, voiceOptions, startPolling]);
+  }, [clip, editedNarration, crossfade, ensureContinuity, bookendImage, voiceOptions, watch, setClip]);
 
-  const handleRetry = useCallback(() => {
+  // Retry after an error. If the clip already has a script, re-run the same
+  // pipeline (the backend allows restarting an errored clip); otherwise start
+  // over from script generation.
+  const handleRetry = useCallback(async () => {
     if (!clip) return;
-    setClip(null);
+
+    if (clip.id && clip.narrationScript) {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch(`/api/clips/${clip.id}/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            narrationScript: editedNarration || clip.narrationScript,
+            crossfade,
+            ensureContinuity,
+            bookendImage,
+            voiceAge: voiceOptions.age,
+            voicePitch: voiceOptions.pitch,
+            voiceTexture: voiceOptions.texture,
+            voiceAccent: voiceOptions.accent,
+          }),
+        });
+        if (!res.ok) throw new Error(await getErrorMessage(res));
+        setClip((prev) => (prev ? { ...prev, status: "generating_video", error: undefined } : prev));
+        watch(clip.id);
+      } catch (err) {
+        setClip((prev) =>
+          prev ? { ...prev, status: "error", error: (err as Error).message } : prev,
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    reset();
     setEditedNarration("");
     handleGenerateScript();
-  }, [clip, handleGenerateScript]);
+  }, [clip, editedNarration, crossfade, ensureContinuity, bookendImage, voiceOptions, watch, reset, setClip, handleGenerateScript]);
+
+  // Clear the tracked clip (and any error) without touching the form.
+  const handleReset = useCallback(() => {
+    reset();
+    setEditedNarration("");
+  }, [reset]);
+
+  // Stop a running generation — the backend pipeline aborts at its next
+  // checkpoint and the clip is marked as stopped.
+  const handleStop = useCallback(async () => {
+    if (!clip?.id) return;
+    try {
+      const res = await fetch(`/api/clips/${clip.id}/cancel`, { method: "POST" });
+      if (res.ok) {
+        const updated: Clip = await res.json();
+        setClip(updated);
+      }
+    } catch {
+      // SSE/polling will surface the state
+    }
+  }, [clip, setClip]);
+
+  // Reset every page setting back to its default and clear the tracked clip.
+  // A pipeline that's still running keeps going on the server unless stopped;
+  // its finished video shows up on the Videos page.
+  const handleResetAll = useCallback(() => {
+    reset();
+    setFaceFile(null);
+    setSelectedPhoto(null);
+    setStoryText("");
+    setLength(30);
+    setPersonality("social");
+    setScriptStyle("social_media");
+    setCrossfade(false);
+    setEnsureContinuity(false);
+    setBookendImage(true);
+    setVoiceOptions(DEFAULT_VOICE_OPTIONS);
+    setEditedNarration("");
+  }, [reset]);
 
   const isGenerating =
     clip &&
@@ -433,6 +519,12 @@ export default function PresenterModePage() {
                 value={crossfade}
                 onChange={(checked) => setCrossfade(checked)}
               />
+              <CheckboxInput
+                label="Seamless cuts (start & end each clip on your photo)"
+                description="Every 8-second clip begins and ends exactly on the presenter photo, so the frames on both sides of each cut match and the stitched video looks like fewer cuts. Needs a face photo."
+                value={bookendImage}
+                onChange={(checked) => setBookendImage(checked)}
+              />
             </div>
 
             <div className={styles.section}>
@@ -449,13 +541,23 @@ export default function PresenterModePage() {
               )}
 
               {clip?.status === "script_ready" ? (
-                <Button
-                  variant="primary"
-                  size="lg"
-                  label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
-                  isDisabled={!canGenerateVideo}
-                  clickAction={handleGenerateVideo}
-                />
+                <>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
+                    isDisabled={!canGenerateVideo}
+                    clickAction={handleGenerateVideo}
+                  />
+                  {/* Not happy with the script? Write a fresh one from the
+                      same story text and settings. */}
+                  <Button
+                    variant="secondary"
+                    label={isSubmitting ? "Submitting…" : "↻ Regenerate Script"}
+                    isDisabled={!storyText.trim() || isSubmitting}
+                    clickAction={handleGenerateScript}
+                  />
+                </>
               ) : (
                 <Button
                   variant="primary"
@@ -476,11 +578,27 @@ export default function PresenterModePage() {
                 <Banner
                   status="error"
                   title="Generation failed"
-                  onDismiss={() => setClip(null)}
+                  onDismiss={handleReset}
                 >
                   {clip.error}
                 </Banner>
               )}
+
+              {/* Page controls — stop a running generation / reset the page */}
+              <div className={styles.controlRow}>
+                {isGenerating && (
+                  <Button
+                    variant="secondary"
+                    label="⏹ Stop Generation"
+                    clickAction={handleStop}
+                  />
+                )}
+                <Button
+                  variant="secondary"
+                  label="↺ Reset All Settings"
+                  clickAction={handleResetAll}
+                />
+              </div>
             </div>
           </div>
 
@@ -491,12 +609,19 @@ export default function PresenterModePage() {
                 <StatusTracker
                   status={clip.status}
                   error={clip.error}
+                  statusMessage={clip.statusMessage}
                   currentSegment={clip.currentSegment}
                   totalSegments={clip.totalSegments}
                   enableNarration={false}
                   enableMusic={false}
                   onRetry={handleRetry}
                 />
+                {isInFlight(clip.status) && (
+                  <p className={styles.backgroundNote}>
+                    You can refresh or close this page — generation keeps
+                    running on the server and this page picks it back up.
+                  </p>
+                )}
               </div>
             )}
 

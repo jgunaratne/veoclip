@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
 import { FileInput } from "@astryxdesign/core/FileInput";
+import { useClipTracker } from "../hooks/useClipTracker";
 import VideoPlayer from "../components/VideoPlayer";
 import styles from "./page.module.css";
 
@@ -40,10 +41,12 @@ export default function CompositePage() {
   const [backgroundId, setBackgroundId] = useState<string | null>(null);
   const [backgroundFile, setBackgroundFile] = useState<File | null>(null);
 
-  const [job, setJob] = useState<CompositeClip | null>(null);
+  // Job state — the tracker persists the active job ID in localStorage and
+  // reattaches after a page refresh, since the composite runs on the server.
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [presenterScale, setPresenterScale] = useState(40);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { clip: job, setClip: setJob, watch, reset } =
+    useClipTracker<CompositeClip>("veoclip.activeClip.composite");
 
   useEffect(() => {
     fetch("/api/videos")
@@ -52,31 +55,10 @@ export default function CompositePage() {
         setVideos(await res.json());
       })
       .catch((err) => setLoadError((err as Error).message));
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
   }, []);
 
   const presenters = videos.filter((v) => v.mode === "presenter");
   const backgrounds = videos.filter((v) => v.mode !== "presenter");
-
-  const startPolling = useCallback((clipId: string) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/clips/${clipId}`);
-        if (!res.ok) return;
-        const updated: CompositeClip = await res.json();
-        setJob(updated);
-        if (updated.status === "complete" || updated.status === "error") {
-          clearInterval(pollingRef.current!);
-          pollingRef.current = null;
-        }
-      } catch {
-        // Ignore
-      }
-    }, 2000);
-  }, []);
 
   const handleComposite = useCallback(async () => {
     if (!presenterId || (!backgroundId && !backgroundFile)) return;
@@ -98,13 +80,13 @@ export default function CompositePage() {
 
       const clip: CompositeClip = await res.json();
       setJob(clip);
-      startPolling(clip.id);
+      watch(clip.id);
     } catch (err) {
       setJob({ id: "", status: "error", error: (err as Error).message });
     } finally {
       setIsSubmitting(false);
     }
-  }, [presenterId, backgroundId, backgroundFile, presenterScale, startPolling]);
+  }, [presenterId, backgroundId, backgroundFile, presenterScale, watch, setJob]);
 
   const resultUrl = job?.status === "complete" && job.finalPath
     ? `/media/${job.finalPath.split("/").pop()}`
@@ -216,7 +198,7 @@ export default function CompositePage() {
         />
 
         {job?.status === "error" && (
-          <Banner status="error" title="Composite failed" onDismiss={() => setJob(null)}>
+          <Banner status="error" title="Composite failed" onDismiss={reset}>
             {job.error || "Unknown error"}
           </Banner>
         )}

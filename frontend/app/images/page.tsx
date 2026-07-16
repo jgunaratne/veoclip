@@ -39,6 +39,19 @@ export default function ImagesPage() {
   const lastClickedIndex = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Marquee (drag rectangle) selection state
+  const [marqueeRect, setMarqueeRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const marqueeStart = useRef<{ pageX: number; pageY: number } | null>(null);
+  const marqueeBase = useRef<Set<string>>(new Set());
+  const marqueeAdditive = useRef(false);
+  const didMarquee = useRef(false);
+  const cardRefs = useRef(new Map<string, HTMLDivElement | null>());
+
   const fetchImages = useCallback(async () => {
     setLoading(true);
     try {
@@ -76,9 +89,72 @@ export default function ImagesPage() {
     }
   }, [uploadFiles]);
 
+  // Drag a rectangle over the grid to select the images it touches.
+  // Plain drags replace the selection; shift/cmd/ctrl drags add to it.
+  // A real marquee only starts after a few px of movement so ordinary
+  // clicks keep working.
+  const handleGridMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      // Stop native image dragging / text selection from fighting the marquee
+      e.preventDefault();
+
+      marqueeStart.current = { pageX: e.pageX, pageY: e.pageY };
+      marqueeAdditive.current = e.shiftKey || e.metaKey || e.ctrlKey;
+      marqueeBase.current = new Set(selectedSet);
+      didMarquee.current = false;
+
+      const handleMove = (ev: MouseEvent) => {
+        const start = marqueeStart.current;
+        if (!start) return;
+        const dx = ev.pageX - start.pageX;
+        const dy = ev.pageY - start.pageY;
+        if (!didMarquee.current && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        didMarquee.current = true;
+
+        // Anchor lives in page coords so scrolling mid-drag stays correct;
+        // convert to viewport coords for rendering and hit testing
+        const left = Math.min(start.pageX, ev.pageX) - window.scrollX;
+        const top = Math.min(start.pageY, ev.pageY) - window.scrollY;
+        const width = Math.abs(dx);
+        const height = Math.abs(dy);
+        setMarqueeRect({ left, top, width, height });
+
+        const hits = new Set(marqueeAdditive.current ? marqueeBase.current : []);
+        for (const [filename, el] of cardRefs.current) {
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          const overlaps =
+            r.left < left + width && r.right > left && r.top < top + height && r.bottom > top;
+          if (overlaps) hits.add(filename);
+        }
+        setSelectedSet(hits);
+      };
+
+      const handleUp = () => {
+        marqueeStart.current = null;
+        setMarqueeRect(null);
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+        // The click event fires right after mouseup — clear the flag on the
+        // next tick so that click knows it followed a drag
+        setTimeout(() => {
+          didMarquee.current = false;
+        }, 0);
+      };
+
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("mouseup", handleUp);
+    },
+    [selectedSet],
+  );
+
   // Click handler with shift-select support
   const handleCardClick = useCallback(
     (index: number, e: React.MouseEvent) => {
+      // Ignore the click that ends a marquee drag
+      if (didMarquee.current) return;
+
       const filename = images[index].filename;
 
       if (e.shiftKey && lastClickedIndex.current !== null) {
@@ -280,12 +356,15 @@ export default function ImagesPage() {
         </div>
       )}
 
-      {/* Image grid */}
+      {/* Image grid — drag on it to rubber-band-select */}
       {images.length > 0 && (
-        <div className={styles.grid}>
+        <div className={styles.grid} onMouseDown={handleGridMouseDown}>
           {images.map((image, index) => (
             <div
               key={image.filename}
+              ref={(el) => {
+                cardRefs.current.set(image.filename, el);
+              }}
               className={`${styles.card} ${selectedSet.has(image.filename) ? styles.cardSelected : ""}`}
               onClick={(e) => handleCardClick(index, e)}
             >
@@ -335,6 +414,19 @@ export default function ImagesPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Marquee selection rectangle */}
+      {marqueeRect && (
+        <div
+          className={styles.marquee}
+          style={{
+            left: marqueeRect.left,
+            top: marqueeRect.top,
+            width: marqueeRect.width,
+            height: marqueeRect.height,
+          }}
+        />
       )}
 
       {/* Detail panel — single selection only */}

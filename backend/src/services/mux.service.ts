@@ -479,8 +479,9 @@ async function sampleBackgroundColor(
  * similarity — Veo's muted green sits too close to skin tones in chroma
  * space for a fixed #00FF00 chromakey), and the background video is
  * scaled/cropped to cover the presenter's full frame. The result runs for
- * the presenter's duration (background loops if shorter) with the
- * presenter's audio.
+ * the presenter's duration (background loops if shorter). The audio mixes
+ * both sources: the presenter's voice at full level with the background
+ * video's track ducked underneath, so both stay audible.
  */
 export async function chromaKeyComposite(opts: {
   presenterPath: string;
@@ -492,20 +493,27 @@ export async function chromaKeyComposite(opts: {
   const { presenterPath, backgroundPath, outputDir, clipId, presenterScale = 0.4 } = opts;
   const outputPath = path.join(outputDir, `${clipId}_composite.mp4`);
 
-  const meta = await new Promise<{ w: number; h: number; dur: number }>((resolve, reject) => {
-    ffmpeg.ffprobe(presenterPath, (err, md) => {
-      if (err) {
-        reject(new Error(`ffprobe failed for ${presenterPath}: ${err.message}`));
-        return;
-      }
-      const vs = (md.streams ?? []).find((s) => s.codec_type === 'video');
-      resolve({
-        w: vs?.width ?? 720,
-        h: vs?.height ?? 1280,
-        dur: md.format?.duration ?? 0,
+  const probe = (file: string) =>
+    new Promise<{ w: number; h: number; dur: number; hasAudio: boolean }>((resolve, reject) => {
+      ffmpeg.ffprobe(file, (err, md) => {
+        if (err) {
+          reject(new Error(`ffprobe failed for ${file}: ${err.message}`));
+          return;
+        }
+        const vs = (md.streams ?? []).find((s) => s.codec_type === 'video');
+        resolve({
+          w: vs?.width ?? 720,
+          h: vs?.height ?? 1280,
+          dur: md.format?.duration ?? 0,
+          hasAudio: (md.streams ?? []).some((s) => s.codec_type === 'audio'),
+        });
       });
     });
-  });
+
+  const meta = await probe(presenterPath);
+  const bgHasAudio = await probe(backgroundPath)
+    .then((m) => m.hasAudio)
+    .catch(() => false);
 
   const region = await detectContentRegion(presenterPath, meta.w, meta.h);
   const keyColor = await sampleBackgroundColor(presenterPath, region, outputDir, clipId).catch(
@@ -535,6 +543,28 @@ export async function chromaKeyComposite(opts: {
     `[bg][fg]overlay=${overlayX}:${overlayY}[vout]`,
   ];
 
+  // Mix both audio tracks when available: presenter voice at full level with
+  // the background's narration/music ducked underneath, limited to avoid
+  // clipping. The presenter track leads amix, so `duration=first` follows the
+  // presenter (the looped background is infinite). Fall back to whichever
+  // single track exists.
+  const audioOptions: string[] = [];
+  if (meta.hasAudio && bgHasAudio) {
+    filters.push(
+      '[0:a]volume=0.5[bga]',
+      '[1:a][bga]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[aout]',
+    );
+    audioOptions.push('-map [aout]', '-c:a aac', '-b:a 192k');
+  } else if (meta.hasAudio) {
+    audioOptions.push('-map 1:a:0', '-c:a aac', '-b:a 192k');
+  } else if (bgHasAudio) {
+    audioOptions.push('-map 0:a:0', '-c:a aac', '-b:a 192k');
+  }
+  console.log(
+    `[ffmpeg] Composite audio: presenter=${meta.hasAudio}, background=${bgHasAudio}` +
+      `${meta.hasAudio && bgHasAudio ? ' — mixing (background at 50%)' : ''}`,
+  );
+
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(backgroundPath)
@@ -543,14 +573,12 @@ export async function chromaKeyComposite(opts: {
       .complexFilter(filters)
       .outputOptions([
         '-map [vout]',
-        '-map 1:a:0?',
+        ...audioOptions,
         `-t ${meta.dur}`,
         '-c:v libx264',
         '-crf 18',
         '-preset medium',
         '-pix_fmt yuv420p',
-        '-c:a aac',
-        '-b:a 192k',
       ])
       .output(outputPath)
       .on('start', (c) => console.log(`[ffmpeg] ${c}`))
