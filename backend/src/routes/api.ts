@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import type { Clip, StoryLength, PresenterPersonality, PresenterStyle, VoiceAge, VoicePitch, VoiceTexture } from '../types/clip.js';
+import type { Clip, StoryLength, PresenterPersonality, PresenterStyle, VoiceAge, VoicePitch, VoiceTexture, VoiceAccent } from '../types/clip.js';
 import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
   getClip,
@@ -26,9 +26,11 @@ import {
   concatenateVideos,
   crossfadeVideos,
   isolateSpeech,
+  chromaKeyComposite,
   extractLastFrame,
 } from '../services/mux.service.js';
 import { generateBackgroundMusic } from '../services/music.service.js';
+import { separateVocals } from '../services/vocal.service.js';
 import {
   ensureGreenScreenBackground,
   greenScreenDerivativePath,
@@ -59,6 +61,19 @@ const upload = multer({
       cb(null, true);
     } else {
       cb(new Error('Only image files are accepted'));
+    }
+  },
+});
+
+// Separate multer instance for background-video uploads (composite feature).
+const videoUpload = multer({
+  storage,
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB per video
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are accepted'));
     }
   },
 });
@@ -196,10 +211,24 @@ const VOICE_AGE_PHRASES: Record<Exclude<VoiceAge, 'default'>, string> = {
     'delivered with the measured, seasoned cadence of an older adult in their sixties',
 };
 
+// Accents are deliberately phrased as subtle — a light coloring of the
+// speech, never a caricature.
+const VOICE_ACCENT_PHRASES: Record<Exclude<VoiceAccent, 'default'>, string> = {
+  american: 'speaking with a mild, neutral American accent',
+  british: 'speaking with a soft, understated British English accent',
+  german:
+    'speaking fluent English with a subtle, light German accent — a gentle coloring of the pronunciation, never strong or exaggerated',
+  french:
+    'speaking fluent English with a subtle, light French accent — a gentle coloring of the pronunciation, never strong or exaggerated',
+  spanish:
+    'speaking fluent English with a subtle, light Spanish accent — a gentle coloring of the pronunciation, never strong or exaggerated',
+};
+
 export interface PresenterVoiceOptions {
   age?: VoiceAge;
   pitch?: VoicePitch;
   texture?: VoiceTexture;
+  accent?: VoiceAccent;
 }
 
 // Uniform talking-head prompt used for every presenter-mode segment.
@@ -222,16 +251,21 @@ export function getPresenterScenePrompt(
       : '';
   const age =
     voice.age && voice.age !== 'default' ? `, ${VOICE_AGE_PHRASES[voice.age]}` : '';
+  const accent =
+    voice.accent && voice.accent !== 'default'
+      ? `, ${VOICE_ACCENT_PHRASES[voice.accent]}`
+      : '';
 
   const article = /^[aeiou]/i.test(style.tone) ? 'an' : 'a';
   const voiceSentence =
-    `The person speaks in the exact same voice in every clip: ` +
-    `${article} ${style.tone}, ${pitch} adult voice${texture}, ${style.delivery}${age}.`;
+    `The person speaks in the exact same voice and the exact same accent in every clip: ` +
+    `${article} ${style.tone}, ${pitch} adult voice${texture}, ${style.delivery}${accent}${age}. ` +
+    `The voice and accent are perfectly identical and consistent from clip to clip — never shifting in accent, pitch, or character.`;
 
   return (
     'The entire background is a solid, uniform, bright green chroma key screen (#00FF00). ' +
     'A flat green screen fills every part of the frame behind the person — no room, no wall texture, no scenery, no furniture, no environment of any kind. ' +
-    style.visual + ' ' + voiceSentence + ' Same person, same voice, same energy, same framing throughout. ' +
+    style.visual + ' ' + voiceSentence + ' Same person, same voice, same accent, same energy, same framing throughout. ' +
     'One single continuous take from a static locked-off camera: no transitions, no cuts, no fades, no wipes, no cross-dissolves, no jump cuts, no scene changes, no camera movement, no zoom. ' +
     'The person is completely alone in a silent, soundproofed studio — no one else is present: no audience, no crowd, no bystanders, no one off-camera. ' +
     'There is absolutely NO music of any kind: no background music, no soundtrack, no musical score, no instrumental music, no ambient music, no melody, no humming, no singing. ' +
@@ -243,7 +277,7 @@ export function getPresenterScenePrompt(
 
 // Voice options as stored on a clip, in the shape getPresenterScenePrompt takes.
 function clipVoiceOptions(clip: Clip): PresenterVoiceOptions {
-  return { age: clip.voiceAge, pitch: clip.voicePitch, texture: clip.voiceTexture };
+  return { age: clip.voiceAge, pitch: clip.voicePitch, texture: clip.voiceTexture, accent: clip.voiceAccent };
 }
 
 // Validate a client-supplied voice option against the known phrase map.
@@ -255,32 +289,38 @@ function parseVoiceOption<T extends string>(
   return typeof value === 'string' && value in phrases ? (value as T) : undefined;
 }
 
-// Wrapped around EVERY story-mode scene prompt: green screen background first
-// (Veo weights the start of the prompt most heavily), reinforced at the end.
+// Wrapped around EVERY story-mode scene prompt: enforces one continuous take
+// per segment (Veo weights the prompt edges most heavily). Story scenes keep
+// their full environments — no green screen in story mode.
 const SCENE_STYLE_PREFIX =
-  'The entire background is a solid, uniform, bright green chroma key screen (#00FF00) — ' +
-  'a flat green screen fills the frame behind the subject, with no scenery or environment of any kind. ' +
-  'One single continuous shot with no transitions, no cuts, no fades, and no scene changes. ';
+  'One single continuous cinematic shot with no transitions, no cuts, no fades, and no scene changes. ';
 const SCENE_STYLE_SUFFIX =
-  ' The entire background MUST be a solid, uniform bright green chroma key screen (#00FF00). ' +
-  'No other background elements, scenery, or environments — only a flat green screen behind the subject. ' +
-  'One single continuous shot: absolutely no transitions, no cuts, no fades, no wipes, no cross-dissolves, no scene changes.';
+  ' One single continuous shot: absolutely no transitions, no cuts, no fades, no wipes, no cross-dissolves, no scene changes.';
 
 // Sent to Veo as negativePrompt alongside every segment. Veo negative prompts
 // list unwanted concepts directly (no "no ..." phrasing).
-const NEGATIVE_PROMPT =
-  'scene transitions, cuts, fades, cross-dissolves, wipes, jump cuts, scene changes, montage, split screen, ' +
-  'background scenery, room interior, outdoor landscape, sky, buildings, trees, furniture, walls, windows, ' +
-  'on-screen text, captions, subtitles, watermark, logo, ' +
-  'music, background music, soundtrack, musical score, instrumental music, ambient music, melody, jingle, humming, singing, ' +
-  'background noise, sound effects, whoosh sounds, audio transitions';
+const TRANSITION_TERMS =
+  'scene transitions, cuts, fades, cross-dissolves, wipes, jump cuts, scene changes, montage, split screen';
+const TEXT_TERMS = 'on-screen text, captions, subtitles, watermark, logo';
+const MUSIC_TERMS =
+  'music, background music, soundtrack, musical score, instrumental music, ambient music, melody, jingle, humming, singing';
 
-// Presenter mode: only the presenter's voice is allowed, so also suppress
-// every other human sound Veo likes to add to talking-head footage.
-const PRESENTER_NEGATIVE_PROMPT =
-  NEGATIVE_PROMPT +
-  ', laughter, laughing, giggling, chuckling, laugh track, audience, audience reactions, applause, clapping, ' +
-  'cheering, crowd noise, background voices, off-screen voices, chatter, multiple people talking, echo';
+// Story mode: scenery and sound effects are welcome — scenes are full cinematic
+// environments. Only Veo-generated music is suppressed, because the Lyria track
+// is mixed in after generation and the two would clash.
+const NEGATIVE_PROMPT = [TRANSITION_TERMS, TEXT_TERMS, MUSIC_TERMS].join(', ');
+
+// Presenter mode: strict talking-head — no environment, and no audio of any
+// kind except the presenter's voice.
+const PRESENTER_NEGATIVE_PROMPT = [
+  TRANSITION_TERMS,
+  'background scenery, room interior, outdoor landscape, sky, buildings, trees, furniture, walls, windows',
+  TEXT_TERMS,
+  MUSIC_TERMS,
+  'background noise, sound effects, whoosh sounds, audio transitions',
+  'laughter, laughing, giggling, chuckling, laugh track, audience, audience reactions, applause, clapping, ' +
+    'cheering, crowd noise, background voices, off-screen voices, chatter, multiple people talking, echo',
+].join(', ');
 
 // Deliberately safe fallback prompt for presenter mode.
 const PRESENTER_FALLBACK_SCENE =
@@ -341,6 +381,74 @@ apiRouter.get('/videos', async (_req: Request, res: Response) => {
   res.json(results);
 });
 
+// Composite: superimpose a green-screen presenter video onto a background
+// video. The background comes either from an uploaded file ('background')
+// or an existing clip (backgroundClipId). Returns a clip in mode 'composite'
+// that can be tracked like any other clip and shows up in /videos when done.
+apiRouter.post(
+  '/composite',
+  videoUpload.single('background'),
+  async (req: Request, res: Response) => {
+    try {
+      const { presenterClipId, backgroundClipId } = req.body;
+
+      const presenter = getClip(presenterClipId);
+      const presenterPath = presenter?.finalPath || presenter?.videoPath;
+      if (!presenter || presenter.mode !== 'presenter' || presenter.status !== 'complete' || !presenterPath) {
+        res.status(400).json({ error: 'presenterClipId must reference a completed presenter-mode clip' });
+        return;
+      }
+
+      let backgroundPath = req.file?.path;
+      if (!backgroundPath && backgroundClipId) {
+        const bg = getClip(backgroundClipId);
+        backgroundPath = bg?.finalPath || bg?.videoPath;
+      }
+      if (!backgroundPath) {
+        res.status(400).json({ error: 'Provide a background video upload or a backgroundClipId' });
+        return;
+      }
+
+      const clip: Clip = {
+        id: uuidv4(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        title: `Composite — ${presenter.title || 'Presenter'}`,
+        storyText: presenter.storyText,
+        referenceImagePaths: [],
+        speakerVoice: presenter.speakerVoice,
+        length: presenter.length,
+        mode: 'composite',
+        status: 'muxing',
+      };
+      setClip(clip);
+      res.status(202).json(clip);
+
+      // Run the composite async — the client tracks it via /clips/:id
+      (async () => {
+        try {
+          const finalPath = await chromaKeyComposite({
+            presenterPath,
+            backgroundPath: backgroundPath!,
+            outputDir,
+            clipId: clip.id,
+          });
+          updateClip(clip.id, { finalPath, status: 'complete' });
+          console.log(`[composite] Clip ${clip.id} complete!`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`[composite] Failed for clip ${clip.id}:`, message);
+          updateClip(clip.id, { status: 'error', error: message });
+        }
+      })();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[api] Composite request failed:', message);
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
 // Get a single clip
 apiRouter.get('/clips/:id', (req: Request, res: Response) => {
   const clip = getClip(req.params.id as string);
@@ -391,7 +499,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, voiceAge, voicePitch, voiceTexture } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, voiceAge, voicePitch, voiceTexture, voiceAccent } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -430,6 +538,7 @@ apiRouter.post(
         voiceAge: mode === 'presenter' ? parseVoiceOption<VoiceAge>(voiceAge, VOICE_AGE_PHRASES) : undefined,
         voicePitch: mode === 'presenter' ? parseVoiceOption<VoicePitch>(voicePitch, VOICE_PITCH_PHRASES) : undefined,
         voiceTexture: mode === 'presenter' ? parseVoiceOption<VoiceTexture>(voiceTexture, VOICE_TEXTURE_PHRASES) : undefined,
+        voiceAccent: mode === 'presenter' ? parseVoiceOption<VoiceAccent>(voiceAccent, VOICE_ACCENT_PHRASES) : undefined,
         status: 'idle',
       };
 
@@ -521,7 +630,7 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   // If the user sent an edited narrationScript, musicPrompt, or crossfade
   // setting, store them before launching. The crossfade checkbox can be
   // toggled after the clip was created, so the generate-time value wins.
-  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride } = req.body ?? {};
+  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride, voiceAccent: voiceAccentOverride } = req.body ?? {};
   if (narrationOverride && typeof narrationOverride === 'string') {
     updateClip(clip.id, { narrationScript: narrationOverride });
   }
@@ -534,11 +643,12 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   if (typeof continuityOverride === 'boolean') {
     updateClip(clip.id, { ensureContinuity: continuityOverride });
   }
-  if (clip.mode === 'presenter' && (voiceAgeOverride || voicePitchOverride || voiceTextureOverride)) {
+  if (clip.mode === 'presenter' && (voiceAgeOverride || voicePitchOverride || voiceTextureOverride || voiceAccentOverride)) {
     updateClip(clip.id, {
       voiceAge: parseVoiceOption<VoiceAge>(voiceAgeOverride, VOICE_AGE_PHRASES),
       voicePitch: parseVoiceOption<VoicePitch>(voicePitchOverride, VOICE_PITCH_PHRASES),
       voiceTexture: parseVoiceOption<VoiceTexture>(voiceTextureOverride, VOICE_TEXTURE_PHRASES),
+      voiceAccent: parseVoiceOption<VoiceAccent>(voiceAccentOverride, VOICE_ACCENT_PHRASES),
     });
   }
 
@@ -726,11 +836,13 @@ async function runPipeline(clipId: string): Promise<void> {
       });
     }
 
-    // ── Step 1.5: Green-screen the reference images ──────────────────
-    // Veo image-to-video keeps the seed image's background, so the seeds
-    // themselves must have a green background — prompts alone can't force it.
+    // ── Step 1.5: Green-screen the reference images (presenter only) ──
+    // Presenter mode needs a chroma-key background, and Veo image-to-video
+    // keeps the seed image's background — so presenter seeds must be
+    // green-screened. Story mode uses the photos untouched: their settings,
+    // backgrounds, and every original element carry into the video.
     let seedImagePaths = clip.referenceImagePaths;
-    if (seedImagePaths.length > 0) {
+    if (clip.mode === 'presenter' && seedImagePaths.length > 0) {
       console.log(`[pipeline] Green-screening ${seedImagePaths.length} reference image(s)`);
       seedImagePaths = await Promise.all(
         seedImagePaths.map((p) => ensureGreenScreenBackground(p)),
@@ -787,8 +899,8 @@ async function runPipeline(clipId: string): Promise<void> {
           `${segmentTexts.map((t) => t.split(/\s+/).length).join('/')} words)`,
       );
     } else {
-      // Story mode: wrap every scene so it's a single continuous green-screen
-      // shot (presenter prompts already contain this)
+      // Story mode: wrap every scene so it's a single continuous shot with no
+      // transitions (presenter prompts already contain this)
       for (let i = 0; i < story.scenes.length; i++) {
         story.scenes[i].prompt = SCENE_STYLE_PREFIX + story.scenes[i].prompt + SCENE_STYLE_SUFFIX;
       }
@@ -920,16 +1032,25 @@ async function runPipeline(clipId: string): Promise<void> {
 
     // For presenter mode, the Veo video already contains speech — skip TTS/music/mux.
     // Veo sometimes bakes music/laughter into the audio despite the prompts, so
-    // run a deterministic speech-isolation pass to scrub everything but the voice.
+    // run a two-stage cleanup: Demucs source separation strips music/ambience even
+    // underneath the voice, then RNNoise speech isolation scrubs any residue.
+    // Both stages are best-effort — each failure falls through to the last good file.
     if (clip.mode === 'presenter') {
       console.log(`[pipeline] Presenter mode: skipping TTS/music, using Veo output directly`);
       updateClip(clipId, { status: 'muxing' });
       let finalPath = videoPath;
       try {
-        finalPath = await isolateSpeech({ videoPath, outputDir, clipId });
+        finalPath = await separateVocals({ videoPath: finalPath, outputDir, clipId });
       } catch (err) {
         console.warn(
-          `[pipeline] Speech isolation failed (non-fatal), using unfiltered audio: ${(err as Error).message}`,
+          `[pipeline] Vocal separation failed (non-fatal): ${(err as Error).message}`,
+        );
+      }
+      try {
+        finalPath = await isolateSpeech({ videoPath: finalPath, outputDir, clipId });
+      } catch (err) {
+        console.warn(
+          `[pipeline] Speech isolation failed (non-fatal): ${(err as Error).message}`,
         );
       }
       updateClip(clipId, { finalPath, status: 'complete' });

@@ -9,6 +9,10 @@ const NAV_ITEMS = [
   { href: "/presenter-mode", label: "Presenter Mode", icon: "🎤" },
 ];
 
+const COMPOSE_ITEMS = [
+  { href: "/composite", label: "Composite", icon: "🎭" },
+];
+
 const LIBRARY_ITEMS = [
   { href: "/videos", label: "My Videos", icon: "🎬" },
 ];
@@ -45,6 +49,19 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         <nav className={styles.nav}>
           <span className={styles.navSection}>Create</span>
           {NAV_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`${styles.navLink} ${pathname === item.href ? styles.navLinkActive : ""}`}
+              onClick={onClose}
+            >
+              <span className={styles.navIcon}>{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+
+          <span className={styles.navSection}>Compose</span>
+          {COMPOSE_ITEMS.map((item) => (
             <Link
               key={item.href}
               href={item.href}

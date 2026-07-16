@@ -1,0 +1,108 @@
+.main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #eee);
+}
+
+.subtitle {
+  color: var(--color-text-secondary, #999);
+  font-size: 0.95rem;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sectionTitle {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #eee);
+}
+
+.empty {
+  color: var(--color-text-secondary, #999);
+  font-size: 0.9rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 12px;
+  border: 1.5px solid var(--color-border-default, rgba(255, 255, 255, 0.08));
+  background: var(--color-background-surface, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  color: var(--color-text-secondary, #999);
+}
+
+.card:hover {
+  border-color: var(--color-border-hover, rgba(255, 255, 255, 0.2));
+  background: var(--color-background-surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.cardActive {
+  border-color: var(--color-accent, #6c63ff);
+  background: rgba(108, 99, 255, 0.1);
+  color: var(--color-text-primary, #fff);
+  box-shadow: 0 0 0 1px var(--color-accent, #6c63ff);
+}
+
+.cardVideo {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #000;
+}
+
+.cardTitle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.cardMeta {
+  font-size: 0.7rem;
+  opacity: 0.65;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 420px;
+}
+
+.downloadBtn {
+  text-align: center;
+}

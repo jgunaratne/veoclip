@@ -59,12 +59,12 @@ If the source text covers these topics, either omit them entirely or reframe the
 2. Exactly ${segmentCount} scene descriptions for 8-second video segments that flow as \
 one continuous story. Each scene should visually illustrate part of the narration with \
 cinematic motion. Describe camera movements, subjects, and visual style. The scenes must \
-be purely visual with ambient sound only: no dialogue, speech, singing, or quoted text, \
-and no on-screen text or labels. Keep imagery symbolic and family-friendly — avoid \
-violence, weapons, suffering.
-- CRITICAL: Every scene MUST place its subject(s) against a solid, uniform bright green \
-chroma key screen (#00FF00). Describe only subjects and foreground action — NEVER describe \
-environments, locations, backgrounds, skies, landscapes, rooms, or scenery of any kind.
+be purely visual — ambient sound and fitting sound effects are welcome, but no dialogue, \
+speech, singing, music, or quoted text, and no on-screen text or labels. Keep imagery \
+symbolic and family-friendly — avoid violence, weapons, suffering.
+- CRITICAL: Describe rich, fully realized environments — settings, backgrounds, lighting, \
+and atmosphere all matter. When reference images are attached, preserve their settings, \
+subjects, and visual elements in the corresponding scenes rather than replacing them.
 - CRITICAL: Each scene must be ONE single continuous shot with no cuts, no transitions, \
 no fades, no dissolves, and no scene changes within the segment. While avoiding identifiable real or historical people in the prompts to pass \
 video safety filters, describe stylized representations or visually abstract depictions of the events/concepts \
@@ -521,8 +521,8 @@ The "segments" array must contain exactly ${segmentCount} strings.`;
 
 /** Deliberately safe fallback prompt for scenes rejected by the safety filter. */
 export const SAFE_FALLBACK_SCENE =
-  'A slow cinematic camera drift with abstract, softly lit shapes and gentle motion ' +
-  'against a solid bright green chroma key screen background. Calm documentary mood. ' +
+  'A slow cinematic camera drift through a softly lit, atmospheric abstract landscape ' +
+  'with gentle motion and warm, diffuse light. Calm documentary mood. ' +
   'Ambient sound only. No people, no text, no dialogue.';
 
 // ---------------------------------------------------------------------------
