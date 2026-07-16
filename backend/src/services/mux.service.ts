@@ -387,6 +387,173 @@ export async function crossfadeVideos(opts: {
   });
 }
 
+interface Region { w: number; h: number; x: number; y: number }
+
+/**
+ * Find the non-black content region of a video (Veo letterboxes presenter
+ * footage with black bars) using ffmpeg cropdetect. Falls back to the full
+ * frame if detection fails.
+ */
+function detectContentRegion(videoPath: string, fullW: number, fullH: number): Promise<Region> {
+  return new Promise((resolve) => {
+    let last: Region = { w: fullW, h: fullH, x: 0, y: 0 };
+    ffmpeg()
+      .input(videoPath)
+      .inputOptions(['-ss 1', '-t 2'])
+      .videoFilters('cropdetect=24:16:0')
+      .format('null')
+      .output('-')
+      .on('stderr', (line: string) => {
+        const m = line.match(/crop=(\d+):(\d+):(\d+):(\d+)/);
+        if (m) last = { w: +m[1], h: +m[2], x: +m[3], y: +m[4] };
+      })
+      .on('end', () => resolve(last))
+      .on('error', () => resolve(last))
+      .run();
+  });
+}
+
+/**
+ * Sample the actual green-screen color from a presenter video. Veo renders
+ * the "green screen" as a muted green (nowhere near #00FF00), and it varies
+ * per generation — keying on the sampled color at tight similarity is what
+ * separates it from skin tones. Samples two patches near the top corners of
+ * the content region (reliably background for a centered chest-up presenter)
+ * and averages them.
+ */
+async function sampleBackgroundColor(
+  videoPath: string,
+  region: Region,
+  outputDir: string,
+  clipId: string,
+): Promise<string> {
+  const framePath = path.join(outputDir, `${clipId}_keyframe.png`);
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(videoPath)
+      .inputOptions(['-ss 1'])
+      .outputOptions(['-frames:v 1'])
+      .output(framePath)
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(err))
+      .run();
+  });
+
+  try {
+    const sharp = (await import('sharp')).default;
+    const patch = async (x: number, y: number) => {
+      const buf = await sharp(framePath)
+        .extract({ left: Math.round(x), top: Math.round(y), width: 16, height: 16 })
+        .resize(1, 1)
+        .removeAlpha()
+        .raw()
+        .toBuffer();
+      return [buf[0], buf[1], buf[2]] as number[];
+    };
+
+    // The green varies with lighting, so sample along both edges at several
+    // heights (edges are reliably background for a centered presenter) and key
+    // on the MOST green-dominant sample — that's the true screen color.
+    // Washed-out pale shades near the subject must never become key colors:
+    // they sit too close to white clothing to key safely, and a colorkey that
+    // matches the person is far worse than a faint background halo.
+    const xs = [region.x + 8, region.x + region.w - 24];
+    const ys = [0.15, 0.4, 0.65, 0.88].map((f) => region.y + region.h * f);
+    const samples = await Promise.all(xs.flatMap((x) => ys.map((y) => patch(x, y))));
+
+    const dominance = (s: number[]) => s[1] - Math.max(s[0], s[2]);
+    const green = samples
+      .filter((s) => dominance(s) > 20)
+      .sort((a, b) => dominance(b) - dominance(a))[0];
+    if (!green) return '0x00FF00';
+    return `0x${green.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+  } finally {
+    await fs.unlink(framePath).catch(() => {});
+  }
+}
+
+/**
+ * Superimpose a green-screen presenter video onto a background video.
+ * The presenter's letterbox bars are cropped away, the actual background
+ * color is sampled from the footage and keyed out (colorkey at tight
+ * similarity — Veo's muted green sits too close to skin tones in chroma
+ * space for a fixed #00FF00 chromakey), and the background video is
+ * scaled/cropped to cover the presenter's full frame. The result runs for
+ * the presenter's duration (background loops if shorter) with the
+ * presenter's audio.
+ */
+export async function chromaKeyComposite(opts: {
+  presenterPath: string;
+  backgroundPath: string;
+  outputDir: string;
+  clipId: string;
+}): Promise<string> {
+  const { presenterPath, backgroundPath, outputDir, clipId } = opts;
+  const outputPath = path.join(outputDir, `${clipId}_composite.mp4`);
+
+  const meta = await new Promise<{ w: number; h: number; dur: number }>((resolve, reject) => {
+    ffmpeg.ffprobe(presenterPath, (err, md) => {
+      if (err) {
+        reject(new Error(`ffprobe failed for ${presenterPath}: ${err.message}`));
+        return;
+      }
+      const vs = (md.streams ?? []).find((s) => s.codec_type === 'video');
+      resolve({
+        w: vs?.width ?? 720,
+        h: vs?.height ?? 1280,
+        dur: md.format?.duration ?? 0,
+      });
+    });
+  });
+
+  const region = await detectContentRegion(presenterPath, meta.w, meta.h);
+  const keyColor = await sampleBackgroundColor(presenterPath, region, outputDir, clipId).catch(
+    (err) => {
+      console.warn(`[ffmpeg] Key color sampling failed (${(err as Error).message}); using 0x00FF00`);
+      return '0x00FF00';
+    },
+  );
+  console.log(
+    `[ffmpeg] Compositing: content ${region.w}x${region.h}@${region.x},${region.y}, key color ${keyColor}`,
+  );
+
+  const filters = [
+    `[0:v]scale=${meta.w}:${meta.h}:force_original_aspect_ratio=increase,crop=${meta.w}:${meta.h}[bg]`,
+    `[1:v]crop=${region.w}:${region.h}:${region.x}:${region.y},format=rgba,` +
+      `colorkey=${keyColor}:0.11:0.05,despill=type=green[fg]`,
+    `[bg][fg]overlay=${region.x}:${region.y}[vout]`,
+  ];
+
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(backgroundPath)
+      .inputOptions(['-stream_loop -1']) // loop background if shorter than presenter
+      .input(presenterPath)
+      .complexFilter(filters)
+      .outputOptions([
+        '-map [vout]',
+        '-map 1:a:0?',
+        `-t ${meta.dur}`,
+        '-c:v libx264',
+        '-crf 18',
+        '-preset medium',
+        '-pix_fmt yuv420p',
+        '-c:a aac',
+        '-b:a 192k',
+      ])
+      .output(outputPath)
+      .on('start', (c) => console.log(`[ffmpeg] ${c}`))
+      .on('end', () => {
+        console.log(`[ffmpeg] Chroma-key composite saved: ${outputPath}`);
+        resolve(outputPath);
+      })
+      .on('error', (err: Error) =>
+        reject(new Error(`FFmpeg composite failed: ${err.message}`)),
+      )
+      .run();
+  });
+}
+
 /**
  * Extract the last frame from a video as a JPEG image for chaining.
  */

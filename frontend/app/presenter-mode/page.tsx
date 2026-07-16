@@ -126,6 +126,7 @@ export default function PresenterModePage() {
       formData.append("voiceAge", voiceOptions.age);
       formData.append("voicePitch", voiceOptions.pitch);
       formData.append("voiceTexture", voiceOptions.texture);
+      formData.append("voiceAccent", voiceOptions.accent);
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -178,6 +179,7 @@ export default function PresenterModePage() {
           voiceAge: voiceOptions.age,
           voicePitch: voiceOptions.pitch,
           voiceTexture: voiceOptions.texture,
+          voiceAccent: voiceOptions.accent,
         }),
       });
 

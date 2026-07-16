@@ -41,6 +41,7 @@ export type PresenterStyle =
 export type VoiceAge = 'default' | 'gen_z' | 'millennial' | 'gen_x' | 'mature';
 export type VoicePitch = 'default' | 'very_low' | 'low' | 'high' | 'very_high';
 export type VoiceTexture = 'default' | 'raspy' | 'breathy' | 'husky' | 'bright';
+export type VoiceAccent = 'default' | 'american' | 'british' | 'german' | 'french' | 'spanish';
 
 export const SEGMENT_DURATION = 8; // seconds (Veo max)
 
@@ -66,12 +67,13 @@ export interface Clip {
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
   crossfade?: boolean; // crossfade between segments instead of hard cuts
-  mode?: 'story' | 'presenter';
+  mode?: 'story' | 'presenter' | 'composite';
   presenterPersonality?: PresenterPersonality;
   presenterStyle?: PresenterStyle;
   voiceAge?: VoiceAge;
   voicePitch?: VoicePitch;
   voiceTexture?: VoiceTexture;
+  voiceAccent?: VoiceAccent;
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;

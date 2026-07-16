@@ -5,17 +5,20 @@ import styles from "./VoicePicker.module.css";
 export type VoiceAge = "default" | "gen_z" | "millennial" | "gen_x" | "mature";
 export type VoicePitch = "default" | "very_low" | "low" | "high" | "very_high";
 export type VoiceTexture = "default" | "raspy" | "breathy" | "husky" | "bright";
+export type VoiceAccent = "default" | "american" | "british" | "german" | "french" | "spanish";
 
 export interface VoiceOptions {
   age: VoiceAge;
   pitch: VoicePitch;
   texture: VoiceTexture;
+  accent: VoiceAccent;
 }
 
 export const DEFAULT_VOICE_OPTIONS: VoiceOptions = {
   age: "default",
   pitch: "default",
   texture: "default",
+  accent: "default",
 };
 
 const AGE_OPTIONS: { value: VoiceAge; label: string }[] = [
@@ -32,6 +35,15 @@ const PITCH_OPTIONS: { value: VoicePitch; label: string }[] = [
   { value: "default", label: "Default" },
   { value: "high", label: "Higher" },
   { value: "very_high", label: "High" },
+];
+
+const ACCENT_OPTIONS: { value: VoiceAccent; label: string }[] = [
+  { value: "default", label: "Default" },
+  { value: "american", label: "American" },
+  { value: "british", label: "British" },
+  { value: "german", label: "German" },
+  { value: "french", label: "French" },
+  { value: "spanish", label: "Spanish" },
 ];
 
 const TEXTURE_OPTIONS: { value: VoiceTexture; label: string }[] = [
@@ -92,6 +104,12 @@ export default function VoicePicker({ value, onChange }: VoicePickerProps) {
         options={PITCH_OPTIONS}
         selected={value.pitch}
         onSelect={(pitch) => onChange({ ...value, pitch })}
+      />
+      <PillRow
+        label="Accent"
+        options={ACCENT_OPTIONS}
+        selected={value.accent}
+        onSelect={(accent) => onChange({ ...value, accent })}
       />
       <PillRow
         label="Texture"

@@ -8,7 +8,7 @@ import styles from "./page.module.css";
 interface VideoEntry {
   id: string;
   title: string;
-  mode: "story" | "presenter";
+  mode: "story" | "presenter" | "composite";
   createdAt: string;
   caption?: string;
   url: string;
@@ -123,7 +123,7 @@ export default function VideosPage() {
                   <span className={styles.playIcon}>▶</span>
                 </div>
                 <span className={`${styles.modeBadge} ${video.mode === "presenter" ? styles.modeBadgePresenter : styles.modeBadgeStory}`}>
-                  {video.mode === "presenter" ? "🎤 Presenter" : "📝 Story"}
+                  {video.mode === "presenter" ? "🎤 Presenter" : video.mode === "composite" ? "🎭 Composite" : "📝 Story"}
                 </span>
               </div>
 
@@ -180,7 +180,7 @@ export default function VideosPage() {
           <div className={styles.detailMeta}>
             <div className={styles.detailMetaRow}>
               <span>Mode</span>
-              <span>{selected.mode === "presenter" ? "🎤 Presenter" : "📝 Story"}</span>
+              <span>{selected.mode === "presenter" ? "🎤 Presenter" : selected.mode === "composite" ? "🎭 Composite" : "📝 Story"}</span>
             </div>
             <div className={styles.detailMetaRow}>
               <span>Length</span>
