@@ -244,8 +244,9 @@ export async function generatePresenterScript(opts: {
   targetSeconds: number;
   segmentCount: number;
   personality?: string;
+  style?: string;
 }): Promise<{ narrationScript: string; segments: string[]; caption?: string }> {
-  const { storyText, targetSeconds, segmentCount, personality = 'social' } = opts;
+  const { storyText, targetSeconds, segmentCount, personality = 'social', style = 'social_media' } = opts;
 
   // Map each personality to its script-writing style instructions
   const personalityPrompts: Record<string, string> = {
@@ -305,9 +306,57 @@ export async function generatePresenterScript(opts: {
       `Think TED talk climax energy — the stakes feel real and personal.`,
   };
 
-  const styleInstructions = personalityPrompts[personality] || personalityPrompts.social;
+  // Map each style to its structural/framing instructions
+  const stylePrompts: Record<string, string> = {
+    social_media:
+      `Frame this as quick-hit social media content — a TikTok, Instagram Reel, or YouTube Short.\n` +
+      `Hook the viewer in the first sentence. Keep the pacing snappy.\n` +
+      `End with something memorable, shareable, or a call to engagement.`,
+    personal:
+      `Frame this as a FIRST-PERSON personal story. The presenter is telling something that happened to THEM.\n` +
+      `Use "I", "my", "me" throughout. Share the experience as a genuine personal anecdote.\n` +
+      `Include specific sensory details and emotional reactions — what you saw, felt, thought.\n` +
+      `The viewer should feel like they're hearing a real person's lived experience, not a report.\n` +
+      `Even if the source text is impersonal, reframe it as if the presenter personally experienced or witnessed it.`,
+    news:
+      `Frame this as an objective news report or briefing. The presenter is a journalist delivering facts.\n` +
+      `Lead with the most important information first (inverted pyramid style).\n` +
+      `Use precise, neutral language. Attribute claims. Cite specific facts, numbers, and names.\n` +
+      `Avoid opinion, editorializing, or emotional language — let the facts speak.\n` +
+      `The viewer should feel informed and trust the presenter as a credible source.`,
+    educational:
+      `Frame this as a teaching moment or explainer. The presenter is helping the viewer understand something.\n` +
+      `Build from simple concepts to more complex ones. Use analogies and examples.\n` +
+      `Anticipate viewer confusion — address "why" and "how", not just "what".\n` +
+      `Use phrases like "here's the thing", "think of it this way", "what this means is".\n` +
+      `The viewer should walk away feeling like they genuinely learned something new.`,
+    storytelling:
+      `Frame this as a third-person narrative story. The presenter is a storyteller weaving a tale.\n` +
+      `Use narrative arc: set the scene, introduce characters/events, build tension, deliver a resolution.\n` +
+      `Paint vivid pictures with descriptive language. Make the viewer see and feel the story.\n` +
+      `Use transitions like "and then", "but what nobody expected was", "that's when everything changed".\n` +
+      `The viewer should feel drawn into a compelling narrative, not just receiving information.`,
+    review:
+      `Frame this as a review or evaluation. The presenter is sharing their honest take on something.\n` +
+      `Be specific about pros, cons, and standout details. Avoid vague praise or criticism.\n` +
+      `Use first-person opinions ("I found", "what impressed me", "the downside for me was").\n` +
+      `Compare to alternatives or expectations where relevant.\n` +
+      `End with a clear verdict or recommendation the viewer can act on.`,
+    motivational:
+      `Frame this as an inspirational or motivational message. The presenter is empowering the viewer.\n` +
+      `Connect the content to the viewer's own life and potential.\n` +
+      `Use empowering language ("you can", "imagine what happens when", "this is your moment").\n` +
+      `Build from the challenge to the possibility — acknowledge difficulty, then show the path forward.\n` +
+      `The viewer should feel inspired and motivated to take action or shift their perspective.`,
+  };
+
+  const toneInstructions = personalityPrompts[personality] || personalityPrompts.social;
+  const framingInstructions = stylePrompts[style] || stylePrompts.social_media;
 
   const prompt = `You are writing a presenter script for a ${targetSeconds}-second talking-head video.
+
+CONTENT FRAMING:
+${framingInstructions}
 
 The video is filmed as exactly ${segmentCount} consecutive 8-second clips. Given the source text below, create:
 
@@ -315,7 +364,8 @@ The video is filmed as exactly ${segmentCount} consecutive 8-second clips. Given
 - Each part MUST be between 15 and 20 words. This matters: fewer than 15 words leaves dead air in the clip, more than 20 words gets cut off before the person finishes speaking.
 - Each part MUST consist only of complete sentences. A sentence must NEVER continue from one part into the next.
 - Together the parts must read as one flowing, continuous monologue — no per-part greetings or restarts.
-- ${styleInstructions}
+DELIVERY TONE:
+- ${toneInstructions}
 - CRITICAL: The narration will be read aloud by a video model with strict content filters. \
 The script MUST NOT mention: alcohol, alcoholism, drugs, drinking, drunkenness, guns, firearms, weapons, \
 violence, aggression, injuries, death, crime, theft, sexual content, or any dangerous/harmful activities. \

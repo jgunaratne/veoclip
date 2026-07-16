@@ -9,6 +9,8 @@ import PromptInput from "../components/PromptInput";
 import DurationPicker from "../components/DurationPicker";
 import PersonalityPicker from "../components/PersonalityPicker";
 import type { PresenterPersonality } from "../components/PersonalityPicker";
+import StylePicker from "../components/StylePicker";
+import type { PresenterStyle } from "../components/StylePicker";
 import StatusTracker from "../components/StatusTracker";
 import VideoPlayer from "../components/VideoPlayer";
 import styles from "./page.module.css";
@@ -60,6 +62,7 @@ export default function PresenterModePage() {
   const [storyText, setStoryText] = useState("");
   const [length, setLength] = useState(30);
   const [personality, setPersonality] = useState<PresenterPersonality>("social");
+  const [scriptStyle, setScriptStyle] = useState<PresenterStyle>("social_media");
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -112,6 +115,7 @@ export default function PresenterModePage() {
       formData.append("enableNarration", "false"); // Speech is in the Veo video directly
       formData.append("mode", "presenter");
       formData.append("presenterPersonality", personality);
+      formData.append("presenterStyle", scriptStyle);
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -147,7 +151,7 @@ export default function PresenterModePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [faceFile, storyText, length, personality]);
+  }, [faceFile, storyText, length, personality, scriptStyle]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -304,7 +308,8 @@ export default function PresenterModePage() {
             </div>
 
             <div className={styles.section}>
-              <h2 className={styles.sectionTitle}>2. Mood & Settings</h2>
+              <h2 className={styles.sectionTitle}>2. Style & Settings</h2>
+              <StylePicker value={scriptStyle} onChange={setScriptStyle} />
               <PersonalityPicker value={personality} onChange={setPersonality} />
               <div className={styles.settings}>
                 <DurationPicker value={length} onChange={setLength} />

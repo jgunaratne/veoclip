@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import type { Clip, StoryLength, PresenterPersonality } from '../types/clip.js';
+import type { Clip, StoryLength, PresenterPersonality, PresenterStyle } from '../types/clip.js';
 import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
   getClip,
@@ -139,7 +139,8 @@ function getPresenterScenePrompt(personality: PresenterPersonality = 'social'): 
     'A flat green screen fills every part of the frame behind the person — no room, no wall texture, no scenery, no furniture, no environment of any kind. ' +
     visual + ' Same person, same voice, same energy, same framing throughout. ' +
     'One single continuous take from a static locked-off camera: no transitions, no cuts, no fades, no wipes, no cross-dissolves, no jump cuts, no scene changes, no camera movement, no zoom. ' +
-    'No background noise, no music, no sound effects, no audio transitions, no whooshes. The only sound is the person\'s clean spoken voice. ' +
+    'There is absolutely NO music of any kind: no background music, no soundtrack, no musical score, no instrumental music, no ambient music, no melody, no humming, no singing. ' +
+    'No background noise, no sound effects, no audio transitions, no whooshes. The only sound in the entire clip is the person\'s clean spoken voice. ' +
     'The person starts speaking immediately when the clip begins, speaks at a natural pace, and finishes saying the entire text completely just before the clip ends — the speech must never be cut off mid-word or mid-sentence.'
   );
 }
@@ -161,7 +162,8 @@ const NEGATIVE_PROMPT =
   'scene transitions, cuts, fades, cross-dissolves, wipes, jump cuts, scene changes, montage, split screen, ' +
   'background scenery, room interior, outdoor landscape, sky, buildings, trees, furniture, walls, windows, ' +
   'on-screen text, captions, subtitles, watermark, logo, ' +
-  'background music, background noise, sound effects, whoosh sounds, audio transitions';
+  'music, background music, soundtrack, musical score, instrumental music, ambient music, melody, jingle, humming, singing, ' +
+  'background noise, sound effects, whoosh sounds, audio transitions';
 
 // Deliberately safe fallback prompt for presenter mode.
 const PRESENTER_FALLBACK_SCENE =
@@ -272,7 +274,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -299,12 +301,14 @@ apiRouter.post(
         referenceImagePaths: imagePaths,
         speakerVoice: speakerVoice || getDefaultVoice(),
         characterProfile: characterProfile?.trim() || undefined,
-        enableMusic: enableMusic === 'true' || enableMusic === true,
+        // Presenter mode must never have background music, regardless of what the client sends
+        enableMusic: mode === 'presenter' ? false : enableMusic === 'true' || enableMusic === true,
         enableNarration: enableNarration !== 'false' && enableNarration !== false,
         length: parsedLength,
         ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
         mode: mode === 'presenter' ? 'presenter' : 'story',
         presenterPersonality: (mode === 'presenter' && presenterPersonality) ? presenterPersonality as PresenterPersonality : undefined,
+        presenterStyle: (mode === 'presenter' && presenterStyle) ? presenterStyle as PresenterStyle : undefined,
         status: 'idle',
       };
 
@@ -343,6 +347,7 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
         targetSeconds: clip.length,
         segmentCount,
         personality: clip.presenterPersonality,
+        style: clip.presenterStyle,
       });
 
       const scenePrompt = getPresenterScenePrompt(clip.presenterPersonality);
@@ -397,7 +402,7 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   if (narrationOverride && typeof narrationOverride === 'string') {
     updateClip(clip.id, { narrationScript: narrationOverride });
   }
-  if (musicPromptOverride && typeof musicPromptOverride === 'string') {
+  if (musicPromptOverride && typeof musicPromptOverride === 'string' && clip.mode !== 'presenter') {
     updateClip(clip.id, { musicPrompt: musicPromptOverride });
   }
 
@@ -551,6 +556,7 @@ async function runPipeline(clipId: string): Promise<void> {
         targetSeconds: clip.length,
         segmentCount,
         personality: clip.presenterPersonality,
+        style: clip.presenterStyle,
       });
       const pipelineScenePrompt = getPresenterScenePrompt(clip.presenterPersonality);
       story = {
@@ -626,7 +632,10 @@ async function runPipeline(clipId: string): Promise<void> {
         // If we have text for this segment, use it; otherwise repeat the last chunk
         const segText = segmentTexts[i] || segmentTexts[segmentTexts.length - 1] || story.narrationScript;
         story.scenes[i] = {
-          prompt: getPresenterScenePrompt(clip.presenterPersonality) + ` The person says out loud: "${segText}"`,
+          prompt:
+            getPresenterScenePrompt(clip.presenterPersonality) +
+            ` The person says out loud: "${segText}"` +
+            ' This spoken voice is the ONLY audio — no background music or soundtrack anywhere in the clip.',
         };
       }
       console.log(
