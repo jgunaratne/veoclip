@@ -1,14 +1,6 @@
 import ffmpeg from 'fluent-ffmpeg';
-import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 
-// Use the bundled static binaries so no system ffmpeg install is needed.
-// A system install (if present on PATH) still wins via env overrides.
-if (!process.env.FFMPEG_PATH && ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
-}
-if (!process.env.FFPROBE_PATH && ffprobeStatic?.path) {
-  ffmpeg.setFfprobePath(ffprobeStatic.path);
-}
+// Uses ffmpeg / ffprobe from PATH (or FFMPEG_PATH / FFPROBE_PATH env vars).
+// Ensure ffmpeg is installed on the host system (e.g. `apt install ffmpeg`).
 
 export default ffmpeg;
