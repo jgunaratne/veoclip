@@ -22,11 +22,12 @@ async function generateVideoVertex(opts: {
   imageBase64: string | null;
   mimeType: string;
   prompt: string;
+  negativePrompt?: string;
   duration: number;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  const { imageBase64, mimeType, prompt, duration, outputDir, clipId } = opts;
+  const { imageBase64, mimeType, prompt, negativePrompt, duration, outputDir, clipId } = opts;
 
   const projectId = process.env.GCP_PROJECT_ID!;
   const location = process.env.GCP_LOCATION || 'us-central1';
@@ -54,6 +55,7 @@ async function generateVideoVertex(opts: {
       durationSeconds: duration,
       sampleCount: 1,
       enhancePrompt: true,
+      ...(negativePrompt ? { negativePrompt } : {}),
     },
   };
 
@@ -193,11 +195,12 @@ async function generateVideoGemini(opts: {
   imageBase64: string | null;
   mimeType: string;
   prompt: string;
+  negativePrompt?: string;
   duration: number;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  const { imageBase64, mimeType, prompt, duration, outputDir, clipId } = opts;
+  const { imageBase64, mimeType, prompt, negativePrompt, duration, outputDir, clipId } = opts;
 
   const apiKey = process.env.GEMINI_API_KEY!;
   const model = process.env.VEO_MODEL || 'veo-3.1-fast-generate-preview';
@@ -222,6 +225,7 @@ async function generateVideoGemini(opts: {
       durationSeconds: duration,
       aspectRatio: ASPECT_RATIO,
       personGeneration: 'allow_all',
+      ...(negativePrompt ? { negativePrompt } : {}),
     },
   };
 
@@ -355,11 +359,12 @@ async function generateVideoGemini(opts: {
 export async function generateVideo(opts: {
   imagePath: string | null;
   prompt: string;
+  negativePrompt?: string;
   duration: number;
   outputDir: string;
   clipId: string;
 }): Promise<string> {
-  const { imagePath, prompt, duration, outputDir, clipId } = opts;
+  const { imagePath, prompt, negativePrompt, duration, outputDir, clipId } = opts;
 
   let imageBase64: string | null = null;
   let mimeType = 'image/jpeg';
@@ -373,7 +378,7 @@ export async function generateVideo(opts: {
   const mode = getAuthMode();
   console.log(`[veo] Using auth mode: ${mode}`);
 
-  const sharedOpts = { imageBase64, mimeType, prompt, duration, outputDir, clipId };
+  const sharedOpts = { imageBase64, mimeType, prompt, negativePrompt, duration, outputDir, clipId };
 
   const MAX_RETRIES = 3;
   const BACKOFF_SECONDS = [10, 20, 40];

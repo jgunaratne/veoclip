@@ -12,3 +12,7 @@ backend/output/
 *.webm
 *.ogg
 *.m4a
+backend/data/
+
+backend/data/
+backend/models/

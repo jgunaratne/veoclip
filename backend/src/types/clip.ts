@@ -36,6 +36,12 @@ export type PresenterStyle =
   | 'review'        // product / experience review
   | 'motivational'; // inspirational / self-help
 
+/** Presenter voice shaping — prompt-driven, layered on top of the
+ *  personality's default voice description. 'default' leaves it untouched. */
+export type VoiceAge = 'default' | 'gen_z' | 'millennial' | 'gen_x' | 'mature';
+export type VoicePitch = 'default' | 'very_low' | 'low' | 'high' | 'very_high';
+export type VoiceTexture = 'default' | 'raspy' | 'breathy' | 'husky' | 'bright';
+
 export const SEGMENT_DURATION = 8; // seconds (Veo max)
 
 export const SEGMENT_COUNTS: Record<StoryLength, number> = {
@@ -59,9 +65,13 @@ export interface Clip {
   enableNarration?: boolean; // enable voiceover narration
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
+  crossfade?: boolean; // crossfade between segments instead of hard cuts
   mode?: 'story' | 'presenter';
   presenterPersonality?: PresenterPersonality;
   presenterStyle?: PresenterStyle;
+  voiceAge?: VoiceAge;
+  voicePitch?: VoicePitch;
+  voiceTexture?: VoiceTexture;
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;

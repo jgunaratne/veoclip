@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FileInput } from "@astryxdesign/core/FileInput";
 
 import PromptInput from "../components/PromptInput";
@@ -11,6 +12,8 @@ import PersonalityPicker from "../components/PersonalityPicker";
 import type { PresenterPersonality } from "../components/PersonalityPicker";
 import StylePicker from "../components/StylePicker";
 import type { PresenterStyle } from "../components/StylePicker";
+import VoicePicker, { DEFAULT_VOICE_OPTIONS } from "../components/VoicePicker";
+import type { VoiceOptions } from "../components/VoicePicker";
 import StatusTracker from "../components/StatusTracker";
 import VideoPlayer from "../components/VideoPlayer";
 import styles from "./page.module.css";
@@ -63,6 +66,9 @@ export default function PresenterModePage() {
   const [length, setLength] = useState(30);
   const [personality, setPersonality] = useState<PresenterPersonality>("social");
   const [scriptStyle, setScriptStyle] = useState<PresenterStyle>("social_media");
+  const [crossfade, setCrossfade] = useState(false);
+  const [ensureContinuity, setEnsureContinuity] = useState(false);
+  const [voiceOptions, setVoiceOptions] = useState<VoiceOptions>(DEFAULT_VOICE_OPTIONS);
 
   // Generation state
   const [clip, setClip] = useState<Clip | null>(null);
@@ -110,12 +116,16 @@ export default function PresenterModePage() {
       formData.append("storyText", storyText);
       formData.append("speakerVoice", "Puck");
       formData.append("length", String(length));
-      formData.append("ensureContinuity", "true");
+      formData.append("ensureContinuity", String(ensureContinuity));
       formData.append("enableMusic", "false");
       formData.append("enableNarration", "false"); // Speech is in the Veo video directly
       formData.append("mode", "presenter");
       formData.append("presenterPersonality", personality);
       formData.append("presenterStyle", scriptStyle);
+      formData.append("crossfade", String(crossfade));
+      formData.append("voiceAge", voiceOptions.age);
+      formData.append("voicePitch", voiceOptions.pitch);
+      formData.append("voiceTexture", voiceOptions.texture);
 
       const createRes = await fetch("/api/clips", {
         method: "POST",
@@ -151,7 +161,7 @@ export default function PresenterModePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [faceFile, storyText, length, personality, scriptStyle]);
+  }, [faceFile, storyText, length, personality, scriptStyle, crossfade, ensureContinuity, voiceOptions]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -161,7 +171,14 @@ export default function PresenterModePage() {
       const genRes = await fetch(`/api/clips/${clip.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ narrationScript: editedNarration }),
+        body: JSON.stringify({
+          narrationScript: editedNarration,
+          crossfade,
+          ensureContinuity,
+          voiceAge: voiceOptions.age,
+          voicePitch: voiceOptions.pitch,
+          voiceTexture: voiceOptions.texture,
+        }),
       });
 
       if (!genRes.ok) {
@@ -202,7 +219,7 @@ export default function PresenterModePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [clip, editedNarration, startPolling]);
+  }, [clip, editedNarration, crossfade, ensureContinuity, voiceOptions, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
@@ -311,9 +328,22 @@ export default function PresenterModePage() {
               <h2 className={styles.sectionTitle}>2. Style & Settings</h2>
               <StylePicker value={scriptStyle} onChange={setScriptStyle} />
               <PersonalityPicker value={personality} onChange={setPersonality} />
+              <VoicePicker value={voiceOptions} onChange={setVoiceOptions} />
               <div className={styles.settings}>
                 <DurationPicker value={length} onChange={setLength} />
               </div>
+              <CheckboxInput
+                label="Continuity between clips"
+                description="Each clip continues from the last frame of the previous one, so pose and motion flow across cuts. The face photo then only seeds the first clip, so likeness may drift slightly on longer videos."
+                value={ensureContinuity}
+                onChange={(checked) => setEnsureContinuity(checked)}
+              />
+              <CheckboxInput
+                label="Crossfade between cuts"
+                description="Blends each 8-second take into the next with a smooth half-second dissolve instead of a hard cut."
+                value={crossfade}
+                onChange={(checked) => setCrossfade(checked)}
+              />
             </div>
 
             <div className={styles.section}>

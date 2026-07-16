@@ -1,0 +1,56 @@
+/* ── Voice Picker ────────────────────────────────────────────────── */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #eee);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rowLabel {
+  flex: 0 0 4.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #999);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.pill {
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--color-border-default, rgba(255, 255, 255, 0.08));
+  background: var(--color-background-surface, rgba(255, 255, 255, 0.03));
+  color: var(--color-text-secondary, #999);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pill:hover {
+  border-color: var(--color-border-hover, rgba(255, 255, 255, 0.2));
+  background: var(--color-background-surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.pill.active {
+  border-color: var(--color-accent, #6c63ff);
+  background: rgba(108, 99, 255, 0.1);
+  color: var(--color-text-primary, #fff);
+}

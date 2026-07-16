@@ -65,6 +65,7 @@ export default function CreatePage() {
   const [isCharacterSuggesting, setIsCharacterSuggesting] = useState(false);
   const [length, setLength] = useState(30);
   const [ensureContinuity, setEnsureContinuity] = useState(false);
+  const [crossfade, setCrossfade] = useState(false);
   const [enableMusic, setEnableMusic] = useState(true);
   const [musicPrompt, setMusicPrompt] = useState("");
   const [isMusicPromptSuggesting, setIsMusicPromptSuggesting] = useState(false);
@@ -174,6 +175,7 @@ export default function CreatePage() {
       formData.append("speakerVoice", voice);
       formData.append("length", String(length));
       formData.append("ensureContinuity", String(ensureContinuity));
+      formData.append("crossfade", String(crossfade));
       formData.append("enableMusic", String(enableMusic));
       formData.append("enableNarration", String(enableNarration));
       if (useCustomVoice && characterProfile.trim() && enableNarration) {
@@ -220,7 +222,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [files, storyText, voice, length, ensureContinuity, enableMusic, enableNarration, useCustomVoice, characterProfile]);
+  }, [files, storyText, voice, length, ensureContinuity, crossfade, enableMusic, enableNarration, useCustomVoice, characterProfile]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -231,7 +233,7 @@ export default function CreatePage() {
       const genRes = await fetch(`/api/clips/${clip.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ narrationScript: editedNarration, musicPrompt }),
+        body: JSON.stringify({ narrationScript: editedNarration, musicPrompt, crossfade, ensureContinuity }),
       });
 
       if (!genRes.ok) {
@@ -280,7 +282,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [clip, editedNarration, musicPrompt, startPolling]);
+  }, [clip, editedNarration, musicPrompt, crossfade, ensureContinuity, startPolling]);
 
   const handleRetry = useCallback(() => {
     if (!clip) return;
@@ -386,6 +388,13 @@ export default function CreatePage() {
                 description="Tightly links visual flow between scenes (generates sequentially, takes 10-20 minutes). If disabled, scenes generate in parallel (takes ~2 minutes)."
                 value={ensureContinuity}
                 onChange={(checked) => setEnsureContinuity(checked)}
+              />
+
+              <CheckboxInput
+                label="Crossfade between scenes"
+                description="Blends each scene into the next with a smooth half-second dissolve instead of a hard cut."
+                value={crossfade}
+                onChange={(checked) => setCrossfade(checked)}
               />
 
               <CheckboxInput

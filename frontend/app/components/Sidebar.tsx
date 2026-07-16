@@ -9,6 +9,10 @@ const NAV_ITEMS = [
   { href: "/presenter-mode", label: "Presenter Mode", icon: "🎤" },
 ];
 
+const LIBRARY_ITEMS = [
+  { href: "/videos", label: "My Videos", icon: "🎬" },
+];
+
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
@@ -39,7 +43,21 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         </div>
 
         <nav className={styles.nav}>
+          <span className={styles.navSection}>Create</span>
           {NAV_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`${styles.navLink} ${pathname === item.href ? styles.navLinkActive : ""}`}
+              onClick={onClose}
+            >
+              <span className={styles.navIcon}>{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+
+          <span className={styles.navSection}>Library</span>
+          {LIBRARY_ITEMS.map((item) => (
             <Link
               key={item.href}
               href={item.href}
