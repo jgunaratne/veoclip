@@ -42,6 +42,7 @@ export default function CompositePage() {
 
   const [job, setJob] = useState<CompositeClip | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [presenterScale, setPresenterScale] = useState(40);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -90,6 +91,7 @@ export default function CompositePage() {
       } else if (backgroundId) {
         formData.append("backgroundClipId", backgroundId);
       }
+      formData.append("presenterScale", String(presenterScale / 100));
 
       const res = await fetch("/api/composite", { method: "POST", body: formData });
       if (!res.ok) throw new Error(await getErrorMessage(res));
@@ -102,7 +104,7 @@ export default function CompositePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [presenterId, backgroundId, backgroundFile, startPolling]);
+  }, [presenterId, backgroundId, backgroundFile, presenterScale, startPolling]);
 
   const resultUrl = job?.status === "complete" && job.finalPath
     ? `/media/${job.finalPath.split("/").pop()}`
@@ -185,7 +187,26 @@ export default function CompositePage() {
       </div>
 
       <div className={styles.section}>
-        <h2 className={styles.sectionTitle}>3. Composite</h2>
+        <h2 className={styles.sectionTitle}>3. Presenter Size</h2>
+        <div className={styles.sliderRow}>
+          <input
+            type="range"
+            min={10}
+            max={100}
+            step={5}
+            value={presenterScale}
+            onChange={(e) => setPresenterScale(Number(e.target.value))}
+            className={styles.slider}
+          />
+          <span className={styles.sliderLabel}>{presenterScale}%</span>
+        </div>
+        <p className={styles.sliderHint}>
+          Presenter height as a percentage of the video frame
+        </p>
+      </div>
+
+      <div className={styles.section}>
+        <h2 className={styles.sectionTitle}>4. Composite</h2>
         <Button
           variant="primary"
           size="lg"

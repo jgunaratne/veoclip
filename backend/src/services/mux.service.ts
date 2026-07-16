@@ -487,8 +487,9 @@ export async function chromaKeyComposite(opts: {
   backgroundPath: string;
   outputDir: string;
   clipId: string;
+  presenterScale?: number; // 0-1 fraction of frame height (default 0.4)
 }): Promise<string> {
-  const { presenterPath, backgroundPath, outputDir, clipId } = opts;
+  const { presenterPath, backgroundPath, outputDir, clipId, presenterScale = 0.4 } = opts;
   const outputPath = path.join(outputDir, `${clipId}_composite.mp4`);
 
   const meta = await new Promise<{ w: number; h: number; dur: number }>((resolve, reject) => {
@@ -514,14 +515,24 @@ export async function chromaKeyComposite(opts: {
     },
   );
   console.log(
-    `[ffmpeg] Compositing: content ${region.w}x${region.h}@${region.x},${region.y}, key color ${keyColor}`,
+    `[ffmpeg] Compositing: content ${region.w}x${region.h}@${region.x},${region.y}, key color ${keyColor}, ` +
+      `scaled to ${Math.round(presenterScale * 100)}% frame height, overlay at lower-left`,
   );
+
+  // Scale the presenter to the requested fraction of the frame height
+  // (preserving aspect ratio) and anchor it in the lower-left corner.
+  const targetH = Math.round(meta.h * presenterScale);
+  const targetW = Math.round((region.w / region.h) * targetH);
+  const margin = Math.round(Math.min(meta.w, meta.h) * 0.02);
+  const overlayX = margin;
+  const overlayY = meta.h - targetH - margin;
 
   const filters = [
     `[0:v]scale=${meta.w}:${meta.h}:force_original_aspect_ratio=increase,crop=${meta.w}:${meta.h}[bg]`,
     `[1:v]crop=${region.w}:${region.h}:${region.x}:${region.y},format=rgba,` +
-      `colorkey=${keyColor}:0.11:0.05,despill=type=green[fg]`,
-    `[bg][fg]overlay=${region.x}:${region.y}[vout]`,
+      `colorkey=${keyColor}:0.11:0.05,despill=type=green,` +
+      `scale=${targetW}:${targetH}[fg]`,
+    `[bg][fg]overlay=${overlayX}:${overlayY}[vout]`,
   ];
 
   return new Promise((resolve, reject) => {

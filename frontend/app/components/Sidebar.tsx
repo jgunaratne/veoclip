@@ -15,6 +15,7 @@ const COMPOSE_ITEMS = [
 
 const LIBRARY_ITEMS = [
   { href: "/videos", label: "My Videos", icon: "🎬" },
+  { href: "/images", label: "Image Assets", icon: "🖼️" },
 ];
 
 interface SidebarProps {
