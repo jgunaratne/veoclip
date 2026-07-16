@@ -14,6 +14,18 @@ export type ClipStatus =
  *  so each option maps to a segment count. */
 export type StoryLength = 30 | 60 | 180;
 
+/** Presenter personality / mood — controls tone of the script and Veo prompt. */
+export type PresenterPersonality =
+  | 'social'    // upbeat social-media creator (default / legacy)
+  | 'calm'      // relaxed, measured, soothing
+  | 'pensive'   // reflective, thoughtful
+  | 'happy'     // bright, cheerful, smiling
+  | 'energetic' // high-energy, fast-paced
+  | 'serious'   // authoritative, no-nonsense
+  | 'witty'     // clever, dry humor
+  | 'warm'      // friendly, empathetic, inviting
+  | 'intense';  // passionate, driven, urgent
+
 export const SEGMENT_DURATION = 8; // seconds (Veo max)
 
 export const SEGMENT_COUNTS: Record<StoryLength, number> = {
@@ -28,6 +40,7 @@ export interface Clip {
   updatedAt: string;
 
   // Inputs
+  title?: string; // short human-readable title derived from story text
   storyText: string; // pasted source text the story is written from
   referenceImagePaths: string[]; // local filesystem paths (0..n images)
   speakerVoice: string;
@@ -37,9 +50,11 @@ export interface Clip {
   length: StoryLength; // 30, 60 or 180 seconds
   ensureContinuity?: boolean;
   mode?: 'story' | 'presenter';
+  presenterPersonality?: PresenterPersonality;
 
   // Generated story (filled in by the pipeline)
   narrationScript?: string;
+  narrationSegments?: string[]; // presenter mode: per-8s-segment speech, sentence-aligned
   scenePrompts?: string[];
   caption?: string; // TikTok/social media caption
   musicPrompt?: string; // user-editable prompt for background music generation
