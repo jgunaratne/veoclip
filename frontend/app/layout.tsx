@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
-import Sidebar from "./components/Sidebar";
+import AppShell from "./AppShell";
 
 export const metadata: Metadata = {
   title: "VeoClip — Turn Images Into Video",
@@ -18,10 +18,10 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Providers>
-          <Sidebar />
-          {children}
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>
   );
 }
+

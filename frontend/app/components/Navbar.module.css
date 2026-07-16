@@ -1,6 +1,21 @@
 /* Navbar styling is now handled by Astryx TopNav component. */
-/* Additional padding to accommodate the sidebar hamburger button. */
 
 .nav {
-  padding-left: 48px;
+  /* no extra padding needed — hamburger is inside the nav now */
+}
+
+.menuButton {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: inherit;
+  transition: background 0.2s;
+  line-height: 1;
+}
+
+.menuButton:hover {
+  background: rgba(0, 0, 0, 0.06);
 }

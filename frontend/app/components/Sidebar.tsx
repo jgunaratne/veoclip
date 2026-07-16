@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./Sidebar.module.css";
@@ -10,24 +9,20 @@ const NAV_ITEMS = [
   { href: "/presenter-mode", label: "Presenter Mode", icon: "🎤" },
 ];
 
-export default function Sidebar() {
-  const [open, setOpen] = useState(false);
+interface SidebarProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
 
   return (
     <>
-      <button
-        className={styles.hamburger}
-        onClick={() => setOpen(true)}
-        aria-label="Open navigation"
-      >
-        ☰
-      </button>
-
       {/* Backdrop */}
       <div
         className={`${styles.backdrop} ${open ? styles.backdropVisible : ""}`}
-        onClick={() => setOpen(false)}
+        onClick={onClose}
       />
 
       {/* Sidebar panel */}
@@ -36,7 +31,7 @@ export default function Sidebar() {
           <span className={styles.brand}>🎬 VeoClip</span>
           <button
             className={styles.close}
-            onClick={() => setOpen(false)}
+            onClick={onClose}
             aria-label="Close navigation"
           >
             ✕
@@ -49,7 +44,7 @@ export default function Sidebar() {
               key={item.href}
               href={item.href}
               className={`${styles.navLink} ${pathname === item.href ? styles.navLinkActive : ""}`}
-              onClick={() => setOpen(false)}
+              onClick={onClose}
             >
               <span className={styles.navIcon}>{item.icon}</span>
               {item.label}
