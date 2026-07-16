@@ -11,15 +11,17 @@ interface NavbarProps {
 export default function Navbar({ onMenuClick }: NavbarProps) {
   return (
     <TopNav
-      heading={<TopNavHeading heading="VeoClip" headingHref="/" />}
-      startContent={
-        <button
-          className={styles.menuButton}
-          onClick={onMenuClick}
-          aria-label="Open navigation"
-        >
-          ☰
-        </button>
+      heading={
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            className={styles.menuButton}
+            onClick={onMenuClick}
+            aria-label="Open navigation"
+          >
+            ☰
+          </button>
+          <TopNavHeading heading="VeoClip" headingHref="/" />
+        </div>
       }
       className={styles.nav}
     />

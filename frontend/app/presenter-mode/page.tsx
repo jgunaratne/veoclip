@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
 import { FileInput } from "@astryxdesign/core/FileInput";
-import Navbar from "../components/Navbar";
+
 import PromptInput from "../components/PromptInput";
 import DurationPicker from "../components/DurationPicker";
 import StatusTracker from "../components/StatusTracker";
@@ -227,7 +227,6 @@ export default function PresenterModePage() {
 
   return (
     <>
-      <Navbar />
       <main className={styles.main}>
         <div className={styles.header}>
           <h1 className={styles.title}>Presenter Mode</h1>
@@ -238,137 +237,141 @@ export default function PresenterModePage() {
         </div>
 
         <div className={styles.grid}>
-          {/* Full-width status bar */}
-          {clip && clip.status !== "idle" && clip.status !== "script_ready" && (
-            <div className={styles.statusBar}>
-              <StatusTracker
-                status={clip.status}
-                error={clip.error}
-                currentSegment={clip.currentSegment}
-                totalSegments={clip.totalSegments}
-                enableNarration={false}
-                enableMusic={false}
-                onRetry={handleRetry}
-              />
-            </div>
-          )}
-
-          {/* Column 1 — Face image */}
+          {/* Left Column — Inputs & Settings */}
           <div className={styles.left}>
-            <FileInput
-              label="Face Photo"
-              value={faceFile ? [faceFile] : []}
-              onChange={(val) => {
-                if (!val) setFaceFile(null);
-                else if (Array.isArray(val)) setFaceFile(val[0] ?? null);
-                else setFaceFile(val);
-              }}
-              accept="image/*"
-              mode="dropzone"
-              maxFiles={1}
-              description="Upload a clear photo of the person who will present"
-            />
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>1. Presenter & Script</h2>
+              <FileInput
+                label="Face Photo"
+                value={faceFile ? [faceFile] : []}
+                onChange={(val) => {
+                  if (!val) setFaceFile(null);
+                  else if (Array.isArray(val)) setFaceFile(val[0] ?? null);
+                  else setFaceFile(val);
+                }}
+                accept="image/*"
+                mode="dropzone"
+                maxFiles={1}
+                description="Upload a clear photo of the person who will present"
+              />
 
-            {facePreviewUrl && (
-              <div style={{ marginTop: "1rem", position: "relative" }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={facePreviewUrl}
-                  alt="Face preview"
-                  style={{
-                    width: "100%",
-                    borderRadius: "12px",
-                    objectFit: "cover",
-                    maxHeight: "300px",
-                  }}
-                />
-                <button
-                  onClick={() => setFaceFile(null)}
-                  style={{
-                    position: "absolute",
-                    top: 8,
-                    right: 8,
-                    background: "rgba(0,0,0,0.6)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "50%",
-                    width: 28,
-                    height: 28,
-                    cursor: "pointer",
-                    fontSize: "0.85rem",
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-          </div>
+              {facePreviewUrl && (
+                <div style={{ marginTop: "0.5rem", position: "relative" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={facePreviewUrl}
+                    alt="Face preview"
+                    style={{
+                      width: "100%",
+                      borderRadius: "12px",
+                      objectFit: "cover",
+                      maxHeight: "300px",
+                    }}
+                  />
+                  <button
+                    onClick={() => setFaceFile(null)}
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      background: "rgba(0,0,0,0.6)",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "50%",
+                      width: 28,
+                      height: 28,
+                      cursor: "pointer",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
-          {/* Column 2 — Story text + controls */}
-          <div className={styles.middle}>
-            <PromptInput
-              label="Story Text"
-              value={storyText}
-              onChange={setStoryText}
-              placeholder="Paste the text your presenter should narrate — an article, notes, a script… The AI writes the narration from it."
-              maxLength={100000}
-              rows={14}
-            />
-
-            <div className={styles.settings}>
-              <DurationPicker value={length} onChange={setLength} />
+              <PromptInput
+                label="Story Text"
+                value={storyText}
+                onChange={setStoryText}
+                placeholder="Paste the text your presenter should narrate — an article, notes, a script… The AI writes the narration from it."
+                maxLength={100000}
+                rows={12}
+              />
             </div>
 
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>2. Settings</h2>
+              <div className={styles.settings}>
+                <DurationPicker value={length} onChange={setLength} />
+              </div>
+            </div>
 
-            {editedNarration && (
-              <div className={styles.scriptPreview}>
-                <label>Presenter Script</label>
-                <textarea
-                  value={editedNarration}
-                  onChange={(e) => setEditedNarration(e.target.value)}
-                  readOnly={clip?.status !== "script_ready"}
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>3. Generate</h2>
+              {editedNarration && (
+                <div className={styles.scriptPreview}>
+                  <label>Presenter Script</label>
+                  <textarea
+                    value={editedNarration}
+                    onChange={(e) => setEditedNarration(e.target.value)}
+                    readOnly={clip?.status !== "script_ready"}
+                  />
+                </div>
+              )}
+
+              {clip?.status === "script_ready" ? (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
+                  isDisabled={!canGenerateVideo}
+                  clickAction={handleGenerateVideo}
+                />
+              ) : (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  label={
+                    isSubmitting
+                      ? "Submitting…"
+                      : isGenerating
+                        ? "⏳ Generating…"
+                        : "✨ Generate Script"
+                  }
+                  isDisabled={!canGenerateScript}
+                  clickAction={handleGenerateScript}
+                />
+              )}
+
+              {clip?.status === "error" && clip.error && (
+                <Banner
+                  status="error"
+                  title="Generation failed"
+                  onDismiss={() => setClip(null)}
+                >
+                  {clip.error}
+                </Banner>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column — Stage */}
+          <div className={styles.right}>
+            {clip && clip.status !== "idle" && clip.status !== "script_ready" && (
+              <div className={styles.statusBar}>
+                <StatusTracker
+                  status={clip.status}
+                  error={clip.error}
+                  currentSegment={clip.currentSegment}
+                  totalSegments={clip.totalSegments}
+                  enableNarration={false}
+                  enableMusic={false}
+                  onRetry={handleRetry}
                 />
               </div>
             )}
 
-            {clip?.status === "script_ready" ? (
-              <Button
-                variant="primary"
-                size="lg"
-                label={isSubmitting ? "Submitting…" : "🎬 Generate Video"}
-                isDisabled={!canGenerateVideo}
-                clickAction={handleGenerateVideo}
-              />
-            ) : (
-              <Button
-                variant="primary"
-                size="lg"
-                label={
-                  isSubmitting
-                    ? "Submitting…"
-                    : isGenerating
-                      ? "⏳ Generating…"
-                      : "✨ Generate Script"
-                }
-                isDisabled={!canGenerateScript}
-                clickAction={handleGenerateScript}
-              />
-            )}
-
-            {clip?.status === "error" && clip.error && (
-              <Banner
-                status="error"
-                title="Generation failed"
-                onDismiss={() => setClip(null)}
-              >
-                {clip.error}
-              </Banner>
-            )}
-          </div>
-
-          {/* Column 3 — Video */}
-          <div className={styles.right}>
-            {clip?.status === "complete" && finalVideoUrl && (
+            {clip?.status === "complete" && finalVideoUrl ? (
               <div className={styles.resultSection}>
                 <VideoPlayer src={finalVideoUrl} />
                 <a
@@ -394,6 +397,12 @@ export default function PresenterModePage() {
                     />
                   </div>
                 )}
+              </div>
+            ) : (!clip || clip.status === "idle" || clip.status === "script_ready") && (
+              <div className={styles.emptyState}>
+                <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🎙️</div>
+                <h3>Presenter Studio</h3>
+                <p>Upload a face and script on the left to bring your presenter to life.</p>
               </div>
             )}
           </div>
