@@ -2,3 +2,13 @@ node_modules/
 dist/
 .env
 .DS_Store
+
+# Uploaded images & generated media
+backend/uploads/
+backend/output/
+*.mp4
+*.mp3
+*.wav
+*.webm
+*.ogg
+*.m4a

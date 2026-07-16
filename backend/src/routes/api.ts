@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import type { Clip, StoryLength } from '../types/clip.js';
+import type { Clip, StoryLength, PresenterPersonality } from '../types/clip.js';
 import { SEGMENT_COUNTS, SEGMENT_DURATION } from '../types/clip.js';
 import {
   getClip,
@@ -27,6 +27,10 @@ import {
   extractLastFrame,
 } from '../services/mux.service.js';
 import { generateBackgroundMusic } from '../services/music.service.js';
+import {
+  ensureGreenScreenBackground,
+  greenScreenDerivativePath,
+} from '../services/image.service.js';
 
 // ---------------------------------------------------------------------------
 // Multer setup
@@ -80,6 +84,85 @@ async function ensureJpeg(filePath: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Shared scene prompt fragments
+// ---------------------------------------------------------------------------
+
+// Uniform talking-head prompt used for every presenter-mode segment.
+// Leads with the green screen and repeats the identical voice description in
+// every segment — each 8s clip is a separate Veo generation, so the prompt is
+// the only thing keeping voice, framing, and background consistent across cuts.
+// Now personality-aware: body language, energy, and delivery vary by mood.
+function getPresenterScenePrompt(personality: PresenterPersonality = 'social'): string {
+  const personalityVisuals: Record<string, string> = {
+    social:
+      'A person casually talking directly to camera like they are recording a social media video, framed from the chest up, centered in the frame. ' +
+      'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. Natural casual lighting on the person. ' +
+      'The person speaks in the exact same voice in every clip: a warm, clear, medium-pitched adult voice, natural conversational tone, steady volume, even pace.',
+    calm:
+      'A person speaking gently and directly to camera, framed from the chest up, centered in the frame. ' +
+      'Completely relaxed posture, minimal hand gestures, serene expression. Soft, even natural lighting. ' +
+      'The person speaks in the exact same voice in every clip: a soft, soothing, low-to-medium-pitched adult voice, slow and measured pace, calm and steady volume.',
+    pensive:
+      'A person speaking thoughtfully to camera, framed from the chest up, centered in the frame. ' +
+      'Slightly tilted head, occasionally looking slightly off-camera as if considering an idea, then returning to direct eye contact. Muted, contemplative natural lighting. ' +
+      'The person speaks in the exact same voice in every clip: a quiet, reflective, medium-pitched adult voice, deliberate pacing with thoughtful pauses, gentle volume.',
+    happy:
+      'A person speaking brightly to camera with a genuine warm smile, framed from the chest up, centered in the frame. ' +
+      'Open posture, natural smiling, eyes lit up with delight. Bright, warm natural lighting. ' +
+      'The person speaks in the exact same voice in every clip: a cheerful, bright, medium-to-high-pitched adult voice, upbeat natural pace, warm and pleasant volume.',
+    energetic:
+      'A person speaking with high energy directly to camera, framed from the chest up, centered in the frame. ' +
+      'Animated hand gestures, wide eyes, leaning slightly forward with excitement. Bright, dynamic lighting. ' +
+      'The person speaks in the exact same voice in every clip: a strong, energetic, clear adult voice, fast-paced and enthusiastic delivery, confident volume.',
+    serious:
+      'A person speaking with authority directly to camera, framed from the chest up, centered in the frame. ' +
+      'Composed, upright posture, minimal but purposeful hand gestures. Professional, even studio-style lighting. ' +
+      'The person speaks in the exact same voice in every clip: a deep, authoritative, resonant adult voice, measured and deliberate pace, steady commanding volume.',
+    witty:
+      'A person speaking with a subtle knowing expression to camera, framed from the chest up, centered in the frame. ' +
+      'Occasional raised eyebrow, slight smirk, relaxed but sharp body language. Warm, slightly stylized natural lighting. ' +
+      'The person speaks in the exact same voice in every clip: a clever, articulate, medium-pitched adult voice, well-timed pacing with comedic beats, conversational volume.',
+    warm:
+      'A person speaking kindly and directly to camera, framed from the chest up, centered in the frame. ' +
+      'Open, welcoming posture, gentle nodding, soft genuine expressions. Warm golden-toned natural lighting. ' +
+      'The person speaks in the exact same voice in every clip: a gentle, friendly, medium-pitched adult voice, unhurried natural pace, soft and inviting volume.',
+    intense:
+      'A person speaking with focused passion directly to camera, framed from the chest up, centered in the frame. ' +
+      'Leaning slightly forward, purposeful hand gestures for emphasis, unwavering eye contact. Dramatic, focused lighting with slight contrast. ' +
+      'The person speaks in the exact same voice in every clip: a powerful, resonant, medium-to-low-pitched adult voice, varied pacing that builds intensity, strong and compelling volume.',
+  };
+
+  const visual = personalityVisuals[personality] || personalityVisuals.social;
+
+  return (
+    'The entire background is a solid, uniform, bright green chroma key screen (#00FF00). ' +
+    'A flat green screen fills every part of the frame behind the person — no room, no wall texture, no scenery, no furniture, no environment of any kind. ' +
+    visual + ' Same person, same voice, same energy, same framing throughout. ' +
+    'One single continuous take from a static locked-off camera: no transitions, no cuts, no fades, no wipes, no cross-dissolves, no jump cuts, no scene changes, no camera movement, no zoom. ' +
+    'No background noise, no music, no sound effects, no audio transitions, no whooshes. The only sound is the person\'s clean spoken voice. ' +
+    'The person starts speaking immediately when the clip begins, speaks at a natural pace, and finishes saying the entire text completely just before the clip ends — the speech must never be cut off mid-word or mid-sentence.'
+  );
+}
+
+// Wrapped around EVERY story-mode scene prompt: green screen background first
+// (Veo weights the start of the prompt most heavily), reinforced at the end.
+const SCENE_STYLE_PREFIX =
+  'The entire background is a solid, uniform, bright green chroma key screen (#00FF00) — ' +
+  'a flat green screen fills the frame behind the subject, with no scenery or environment of any kind. ' +
+  'One single continuous shot with no transitions, no cuts, no fades, and no scene changes. ';
+const SCENE_STYLE_SUFFIX =
+  ' The entire background MUST be a solid, uniform bright green chroma key screen (#00FF00). ' +
+  'No other background elements, scenery, or environments — only a flat green screen behind the subject. ' +
+  'One single continuous shot: absolutely no transitions, no cuts, no fades, no wipes, no cross-dissolves, no scene changes.';
+
+// Sent to Veo as negativePrompt alongside every segment. Veo negative prompts
+// list unwanted concepts directly (no "no ..." phrasing).
+const NEGATIVE_PROMPT =
+  'scene transitions, cuts, fades, cross-dissolves, wipes, jump cuts, scene changes, montage, split screen, ' +
+  'background scenery, room interior, outdoor landscape, sky, buildings, trees, furniture, walls, windows, ' +
+  'on-screen text, captions, subtitles, watermark, logo, ' +
+  'background music, background noise, sound effects, whoosh sounds, audio transitions';
+
 // Deliberately safe fallback prompt for presenter mode.
 const PRESENTER_FALLBACK_SCENE =
   'A static locked-off shot of a blank bright green chroma key screen background (#00FF00). ' +
@@ -101,6 +184,42 @@ apiRouter.get('/voices', (_req: Request, res: Response) => {
 // List all clips
 apiRouter.get('/clips', (_req: Request, res: Response) => {
   res.json(getAllClips());
+});
+
+// List all completed videos with filesystem metadata
+apiRouter.get('/videos', async (_req: Request, res: Response) => {
+  const clips = getAllClips().filter(
+    (c) => c.status === 'complete' && (c.finalPath || c.videoPath),
+  );
+
+  const results = await Promise.all(
+    clips.map(async (c) => {
+      const filePath = (c.finalPath || c.videoPath)!;
+      const filename = path.basename(filePath);
+      let sizeBytes = 0;
+      try {
+        const stat = await fs.stat(filePath);
+        sizeBytes = stat.size;
+      } catch {
+        // file may have been deleted — skip size
+      }
+      return {
+        id: c.id,
+        title: c.title || 'Untitled',
+        mode: c.mode || 'story',
+        createdAt: c.createdAt,
+        caption: c.caption,
+        url: `/media/${filename}`,
+        filename,
+        sizeBytes,
+        length: c.length,
+      };
+    }),
+  );
+
+  // Newest first
+  results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json(results);
 });
 
 // Get a single clip
@@ -153,7 +272,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -175,6 +294,7 @@ apiRouter.post(
         id: uuidv4(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        title: storyText.trim().slice(0, 60).split('\n')[0].trim() || 'Untitled',
         storyText,
         referenceImagePaths: imagePaths,
         speakerVoice: speakerVoice || getDefaultVoice(),
@@ -184,6 +304,7 @@ apiRouter.post(
         length: parsedLength,
         ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
         mode: mode === 'presenter' ? 'presenter' : 'story',
+        presenterPersonality: (mode === 'presenter' && presenterPersonality) ? presenterPersonality as PresenterPersonality : undefined,
         status: 'idle',
       };
 
@@ -215,25 +336,20 @@ apiRouter.post('/clips/:id/script', async (req: Request, res: Response) => {
     updateClip(clip.id, { status: 'preparing_script' });
 
     if (clip.mode === 'presenter') {
-      // Presenter mode: generate narration only, use uniform talking-head prompt
+      // Presenter mode: generate narration pre-split into per-segment parts,
+      // use uniform talking-head prompt
       const presenterResult = await generatePresenterScript({
         storyText: clip.storyText,
         targetSeconds: clip.length,
+        segmentCount,
+        personality: clip.presenterPersonality,
       });
 
-      const presenterPrompt =
-        'A person casually talking to camera like they are recording a social media video. ' +
-        'Solid bright green chroma key screen background. Natural casual lighting. ' +
-        'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
-        'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
-        'Continuous uninterrupted shot from start to finish. ' +
-        'Absolutely no video transitions, no jump cuts, no video fades, no wipes, no cross-dissolves, no scene changes, no zoom cuts. The video must look like one single continuous take. ' +
-        'No background noise, no music, no background sound effects, no audio transitions, no whooshes, no swooshes, no entry/exit audio effects. ' +
-        'The sound must be only the person\'s clean spoken voice, with absolute silence between words.';
-
+      const scenePrompt = getPresenterScenePrompt(clip.presenterPersonality);
       updateClip(clip.id, {
         narrationScript: presenterResult.narrationScript,
-        scenePrompts: Array.from({ length: segmentCount }, () => presenterPrompt),
+        narrationSegments: presenterResult.segments,
+        scenePrompts: Array.from({ length: segmentCount }, () => scenePrompt),
         caption: presenterResult.caption || undefined,
         status: 'script_ready',
       });
@@ -324,9 +440,10 @@ apiRouter.delete('/clips/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  // Clean up files
+  // Clean up files (including cached green-screened derivatives)
   const filePaths = [
     ...clip.referenceImagePaths,
+    ...clip.referenceImagePaths.map(greenScreenDerivativePath),
     clip.videoPath,
     clip.audioPath,
     clip.finalPath,
@@ -369,6 +486,39 @@ function assignSeedImages(
   return seeds;
 }
 
+/**
+ * Split narration into up to segmentCount chunks on sentence boundaries with
+ * roughly equal word counts. Splitting mid-sentence makes Veo cut words off
+ * at the 8-second segment boundary, which is audible after stitching.
+ */
+function splitNarrationBySentence(narration: string, segmentCount: number): string[] {
+  const sentences =
+    narration
+      .match(/[^.!?…]+[.!?…]+["')\]]*|[^.!?…]+$/g)
+      ?.map((s) => s.trim())
+      .filter(Boolean) ?? [];
+  if (sentences.length === 0) return [narration.trim()].filter(Boolean);
+
+  const totalWords = narration.split(/\s+/).filter(Boolean).length;
+  const targetPerSegment = totalWords / segmentCount;
+
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let currentWords = 0;
+
+  for (const sentence of sentences) {
+    current.push(sentence);
+    currentWords += sentence.split(/\s+/).length;
+    if (chunks.length < segmentCount - 1 && currentWords >= targetPerSegment) {
+      chunks.push(current.join(' '));
+      current = [];
+      currentWords = 0;
+    }
+  }
+  if (current.length > 0) chunks.push(current.join(' '));
+  return chunks;
+}
+
 async function runPipeline(clipId: string): Promise<void> {
   try {
     const clip = getClip(clipId)!;
@@ -393,6 +543,29 @@ async function runPipeline(clipId: string): Promise<void> {
         caption: freshClip.caption,
       };
       updateClip(clipId, { status: 'generating_video', totalSegments: segmentCount });
+    } else if (clip.mode === 'presenter') {
+      updateClip(clipId, { status: 'preparing_script', totalSegments: segmentCount });
+
+      const presenterResult = await generatePresenterScript({
+        storyText: clip.storyText,
+        targetSeconds: clip.length,
+        segmentCount,
+        personality: clip.presenterPersonality,
+      });
+      const pipelineScenePrompt = getPresenterScenePrompt(clip.presenterPersonality);
+      story = {
+        narrationScript: presenterResult.narrationScript,
+        scenes: Array.from({ length: segmentCount }, () => ({ prompt: pipelineScenePrompt })),
+        caption: presenterResult.caption,
+      };
+
+      updateClip(clipId, {
+        narrationScript: presenterResult.narrationScript,
+        narrationSegments: presenterResult.segments,
+        scenePrompts: story.scenes.map((s) => s.prompt),
+        caption: presenterResult.caption || undefined,
+        status: 'generating_video',
+      });
     } else {
       updateClip(clipId, { status: 'preparing_script', totalSegments: segmentCount });
 
@@ -411,66 +584,62 @@ async function runPipeline(clipId: string): Promise<void> {
       });
     }
 
+    // ── Step 1.5: Green-screen the reference images ──────────────────
+    // Veo image-to-video keeps the seed image's background, so the seeds
+    // themselves must have a green background — prompts alone can't force it.
+    let seedImagePaths = clip.referenceImagePaths;
+    if (seedImagePaths.length > 0) {
+      console.log(`[pipeline] Green-screening ${seedImagePaths.length} reference image(s)`);
+      seedImagePaths = await Promise.all(
+        seedImagePaths.map((p) => ensureGreenScreenBackground(p)),
+      );
+    }
+
     // ── Step 2: Generate Veo segments (Sequential vs Parallel) ──────
-    const seedAssignments = assignSeedImages(
-      clip.referenceImagePaths,
-      segmentCount,
-    );
+    const seedAssignments = assignSeedImages(seedImagePaths, segmentCount);
 
     // For presenter mode, use the single face image for ALL segments
     // and embed narration text into each scene prompt
-    if (clip.mode === 'presenter' && clip.referenceImagePaths.length > 0) {
+    if (clip.mode === 'presenter' && seedImagePaths.length > 0) {
       seedAssignments.clear();
-      const faceImage = clip.referenceImagePaths[0];
+      const faceImage = seedImagePaths[0];
       for (let i = 0; i < segmentCount; i++) {
         seedAssignments.set(i, faceImage);
       }
     }
 
     if (clip.mode === 'presenter') {
-      // Split narration into equal-length chunks by word count, ensuring every segment gets text
-      const words = story.narrationScript.split(/\s+/).filter(Boolean);
-      const totalWords = words.length;
-      const wordsPerSegment = Math.max(1, Math.floor(totalWords / segmentCount));
-      const segmentTexts: string[] = [];
-
-      for (let i = 0; i < segmentCount; i++) {
-        const start = i * wordsPerSegment;
-        const end = i === segmentCount - 1 ? totalWords : (i + 1) * wordsPerSegment;
-        const chunk = words.slice(start, end).join(' ');
-        segmentTexts.push(chunk);
-      }
-
-      // Merge any trailing empty segments into the last non-empty one
-      while (segmentTexts.length > 1 && !segmentTexts[segmentTexts.length - 1]) {
-        segmentTexts.pop();
-      }
+      // Prefer the per-segment parts Gemini authored (sized to fill 8s each
+      // without overrunning). If the user edited the script afterwards, the
+      // stored parts are stale — fall back to sentence-boundary splitting so
+      // no segment starts or ends mid-sentence.
+      const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+      const storedSegments = getClip(clipId)?.narrationSegments;
+      const segmentTexts =
+        storedSegments &&
+        storedSegments.length > 0 &&
+        norm(storedSegments.join(' ')) === norm(story.narrationScript)
+          ? storedSegments
+          : splitNarrationBySentence(story.narrationScript, segmentCount);
 
       for (let i = 0; i < Math.min(story.scenes.length, segmentCount); i++) {
         // If we have text for this segment, use it; otherwise repeat the last chunk
         const segText = segmentTexts[i] || segmentTexts[segmentTexts.length - 1] || story.narrationScript;
         story.scenes[i] = {
-          prompt:
-            'A person casually talking to camera like they are recording a social media video. ' +
-            'Solid bright green chroma key screen background. Natural casual lighting. ' +
-            'Relaxed, expressive, and animated — like filming a TikTok or Instagram Reel. ' +
-            'No transitions, no fades, no cuts, no camera movement, no zoom. Static locked-off camera. ' +
-            'Continuous uninterrupted shot from start to finish. ' +
-            'Absolutely no video transitions, no jump cuts, no video fades, no wipes, no cross-dissolves, no scene changes, no zoom cuts. The video must look like one single continuous take. ' +
-            'No background noise, no music, no background sound effects, no audio transitions, no whooshes, no swooshes, no entry/exit audio effects. ' +
-            'The sound must be only the person\'s clean spoken voice, with absolute silence between words. ' +
-            `The person says out loud: "${segText}"`,
+          prompt: getPresenterScenePrompt(clip.presenterPersonality) + ` The person says out loud: "${segText}"`,
         };
       }
-      console.log(`[pipeline] Presenter mode: embedded narration into ${segmentCount} segment(s), ${totalWords} words total, ~${wordsPerSegment} words/segment`);
-    }
-
-    // Ensure ALL clips are generated on a green screen background
-    const GREEN_SCREEN_SUFFIX =
-      ' The entire background MUST be a solid, uniform bright green chroma key screen (#00FF00). ' +
-      'No other background elements, scenery, or environments — only a flat green screen behind the subject.';
-    for (let i = 0; i < story.scenes.length; i++) {
-      story.scenes[i].prompt += GREEN_SCREEN_SUFFIX;
+      console.log(
+        `[pipeline] Presenter mode: embedded narration into ${segmentCount} segment(s) ` +
+          `(${segmentTexts === storedSegments ? 'Gemini-authored parts' : 'sentence-split fallback'}, ` +
+          `${segmentTexts.map((t) => t.split(/\s+/).length).join('/')} words)`,
+      );
+    } else {
+      // Story mode: wrap every scene so it's a single continuous green-screen
+      // shot (presenter prompts already contain this)
+      for (let i = 0; i < story.scenes.length; i++) {
+        story.scenes[i].prompt = SCENE_STYLE_PREFIX + story.scenes[i].prompt + SCENE_STYLE_SUFFIX;
+      }
     }
 
     const segmentPaths: string[] = [];
@@ -495,6 +664,7 @@ async function runPipeline(clipId: string): Promise<void> {
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
             prompt: scenePrompt,
+            negativePrompt: NEGATIVE_PROMPT,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
@@ -506,7 +676,8 @@ async function runPipeline(clipId: string): Promise<void> {
           );
           segVideoPath = await generateVideo({
             imagePath: seedImagePath,
-            prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
+            prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + SCENE_STYLE_SUFFIX,
+            negativePrompt: NEGATIVE_PROMPT,
             duration: SEGMENT_DURATION,
             outputDir,
             clipId: `${clipId}_seg${seg}`,
@@ -548,6 +719,7 @@ async function runPipeline(clipId: string): Promise<void> {
             segVideoPath = await generateVideo({
               imagePath: seedImagePath,
               prompt: scenePrompt,
+              negativePrompt: NEGATIVE_PROMPT,
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,
@@ -559,7 +731,8 @@ async function runPipeline(clipId: string): Promise<void> {
             );
             segVideoPath = await generateVideo({
               imagePath: seedImagePath,
-              prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + GREEN_SCREEN_SUFFIX,
+              prompt: clip.mode === 'presenter' ? PRESENTER_FALLBACK_SCENE : SAFE_FALLBACK_SCENE + SCENE_STYLE_SUFFIX,
+              negativePrompt: NEGATIVE_PROMPT,
               duration: SEGMENT_DURATION,
               outputDir,
               clipId: `${clipId}_seg${seg}`,

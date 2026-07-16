@@ -43,8 +43,8 @@ export async function generateStory(opts: {
 
   const prompt = `You are creating a ${targetSeconds}-second vertical (9:16) social media video. Given the source text below, create:
 
-1. A narration script of AT MOST ${narrationWords} words, paced to finish within \
-${targetSeconds} seconds of natural speech — it must not run over. It should tell an \
+1. A narration script of between ${Math.floor(narrationWords * 0.9)} and ${narrationWords} words \
+— long enough to fill nearly all ${targetSeconds} seconds of the video with natural speech, but it must not run over. It should tell an \
 informative, objective, and realistic story drawn from the source text, mimicking the style of a serious \
 journalistic, educational, or historical documentary (e.g., PBS Frontline or BBC Horizon).
 - Do NOT use generic intro/outro phrases, promotional hooks, or cinematic cliches (e.g., "Join us...", "In this video...", "Discover the secrets of...", "Let's explore...").
@@ -61,7 +61,12 @@ one continuous story. Each scene should visually illustrate part of the narratio
 cinematic motion. Describe camera movements, subjects, and visual style. The scenes must \
 be purely visual with ambient sound only: no dialogue, speech, singing, or quoted text, \
 and no on-screen text or labels. Keep imagery symbolic and family-friendly — avoid \
-violence, weapons, suffering. While avoiding identifiable real or historical people in the prompts to pass \
+violence, weapons, suffering.
+- CRITICAL: Every scene MUST place its subject(s) against a solid, uniform bright green \
+chroma key screen (#00FF00). Describe only subjects and foreground action — NEVER describe \
+environments, locations, backgrounds, skies, landscapes, rooms, or scenery of any kind.
+- CRITICAL: Each scene must be ONE single continuous shot with no cuts, no transitions, \
+no fades, no dissolves, and no scene changes within the segment. While avoiding identifiable real or historical people in the prompts to pass \
 video safety filters, describe stylized representations or visually abstract depictions of the events/concepts \
 mentioned in the narration.${imageNote}
 
@@ -237,24 +242,81 @@ Return ONLY valid JSON (no markdown fences) with this structure:
 export async function generatePresenterScript(opts: {
   storyText: string;
   targetSeconds: number;
-}): Promise<{ narrationScript: string; caption?: string }> {
-  const { storyText, targetSeconds } = opts;
+  segmentCount: number;
+  personality?: string;
+}): Promise<{ narrationScript: string; segments: string[]; caption?: string }> {
+  const { storyText, targetSeconds, segmentCount, personality = 'social' } = opts;
 
-  // ~2.5 words per second for a conversational pace
-  const narrationWords = Math.floor(targetSeconds * 2.5);
+  // Map each personality to its script-writing style instructions
+  const personalityPrompts: Record<string, string> = {
+    social:
+      `Super casual and conversational — like someone filming themselves on their phone.\n` +
+      `Use short punchy sentences, natural pauses, and direct address ("you", "look", "okay so").\n` +
+      `Engaging and hook-driven — the first part should start with something attention-grabbing.\n` +
+      `Informative but not stiff — explain things simply like talking to a friend.\n` +
+      `Feel free to use filler words sparingly for authenticity ("like", "honestly", "basically").`,
+    calm:
+      `Calm, measured, and soothing — like a meditation guide or a thoughtful late-night radio host.\n` +
+      `Use flowing, unhurried sentences with gentle transitions.\n` +
+      `Speak as if sharing something meaningful over a quiet cup of tea.\n` +
+      `Avoid exclamation marks, hype, or urgency. Let the ideas breathe.\n` +
+      `The tone should feel grounding and reassuring throughout.`,
+    pensive:
+      `Reflective and thoughtful — like someone who has been turning an idea over in their mind.\n` +
+      `Use contemplative phrasing with rhetorical questions and pauses for thought.\n` +
+      `The speaker wonders aloud, considers different angles, and invites the viewer to think.\n` +
+      `Avoid definitive statements — prefer "I wonder...", "What if...", "It makes you think...".\n` +
+      `The mood is introspective, like a personal journal entry spoken aloud.`,
+    happy:
+      `Bright, cheerful, and genuinely delighted — like someone sharing exciting good news.\n` +
+      `Use warm, upbeat language with a natural smile you can hear in the voice.\n` +
+      `The speaker is enthusiastic without being over-the-top — think a friend who just discovered something wonderful.\n` +
+      `Use positive framing and words that convey joy and optimism.\n` +
+      `The energy is light and infectious throughout.`,
+    energetic:
+      `High-energy, fast-paced, and electrifying — like a sports commentator or hyped-up vlogger.\n` +
+      `Use punchy, rapid-fire sentences with strong verbs and exclamatory emphasis.\n` +
+      `Build momentum — each part should feel more exciting than the last.\n` +
+      `The speaker is PUMPED about this topic and wants you to feel the same.\n` +
+      `Think motivational speaker meets YouTube creator — raw enthusiasm and passion.`,
+    serious:
+      `Authoritative, measured, and no-nonsense — like a seasoned news anchor or documentary narrator.\n` +
+      `Use precise, well-structured sentences with gravitas.\n` +
+      `Avoid casual filler words or slang. Every word carries weight.\n` +
+      `The speaker commands attention through credibility and composure.\n` +
+      `Think 60 Minutes correspondent — professional, trustworthy, direct.`,
+    witty:
+      `Clever, dry, and subtly funny — like a witty essayist or a smart late-night monologue.\n` +
+      `Weave in unexpected turns of phrase, gentle irony, and playful observations.\n` +
+      `The humor is cerebral, not slapstick — the kind that makes you smirk and think.\n` +
+      `Balance wit with substance — be entertaining AND informative.\n` +
+      `The speaker is sharp and self-aware, occasionally breaking the fourth wall.`,
+    warm:
+      `Friendly, empathetic, and inviting — like a beloved teacher or a trusted older sibling.\n` +
+      `Use inclusive language ("we", "us", "together") and speak with genuine care.\n` +
+      `The speaker makes the viewer feel seen, understood, and welcome.\n` +
+      `Avoid being preachy — this warmth comes from authenticity, not performance.\n` +
+      `Think Mr. Rogers energy — kind, present, and genuinely interested.`,
+    intense:
+      `Passionate, driven, and urgent — like someone who feels this topic deeply and needs you to understand.\n` +
+      `Use bold, declarative sentences with emotional weight.\n` +
+      `The speaker leans in, makes eye contact, and speaks with conviction.\n` +
+      `Build tension and release — some moments are quiet, others hit hard.\n` +
+      `Think TED talk climax energy — the stakes feel real and personal.`,
+  };
 
-  const prompt = `You are writing a casual, social-media-style presenter script for a ${targetSeconds}-second talking-head video. Think TikTok, Instagram Reel, or YouTube Short — one person speaking directly to the camera like they're chatting with a friend.
+  const styleInstructions = personalityPrompts[personality] || personalityPrompts.social;
 
-Given the source text below, create:
+  const prompt = `You are writing a presenter script for a ${targetSeconds}-second talking-head video.
 
-1. A narration script of AT MOST ${narrationWords} words, paced to finish within \
-${targetSeconds} seconds of natural speech. It should be:
-- Super casual and conversational — like someone filming themselves on their phone
-- Use short punchy sentences, natural pauses, and direct address ("you", "look", "okay so")
-- Engaging and hook-driven — start with something attention-grabbing
-- Informative but not stiff — explain things simply like talking to a friend
-- Feel free to use filler words sparingly for authenticity ("like", "honestly", "basically")
-- CRITICAL: The narration will be read aloud by a text-to-speech model with strict content filters. \
+The video is filmed as exactly ${segmentCount} consecutive 8-second clips. Given the source text below, create:
+
+1. The script, written as exactly ${segmentCount} parts — one part per 8-second clip:
+- Each part MUST be between 15 and 20 words. This matters: fewer than 15 words leaves dead air in the clip, more than 20 words gets cut off before the person finishes speaking.
+- Each part MUST consist only of complete sentences. A sentence must NEVER continue from one part into the next.
+- Together the parts must read as one flowing, continuous monologue — no per-part greetings or restarts.
+- ${styleInstructions}
+- CRITICAL: The narration will be read aloud by a video model with strict content filters. \
 The script MUST NOT mention: alcohol, alcoholism, drugs, drinking, drunkenness, guns, firearms, weapons, \
 violence, aggression, injuries, death, crime, theft, sexual content, or any dangerous/harmful activities. \
 If the source text covers these topics, either omit them entirely or reframe them in a safe, positive way.
@@ -268,9 +330,10 @@ ${storyText.slice(0, 6000)}
 
 Return ONLY valid JSON (no markdown fences) with this structure:
 {
-  "narrationScript": "The full narration text...",
+  "segments": ["Part 1 text...", "Part 2 text..."],
   "caption": "Your TikTok caption with #hashtags"
-}`;
+}
+The "segments" array must contain exactly ${segmentCount} strings.`;
 
   const model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
   const { url, headers } = await getGenerateContentEndpoint(model);
@@ -285,10 +348,13 @@ Return ONLY valid JSON (no markdown fences) with this structure:
         responseSchema: {
           type: 'OBJECT',
           properties: {
-            narrationScript: { type: 'STRING' },
+            segments: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
             caption: { type: 'STRING' },
           },
-          required: ['narrationScript', 'caption'],
+          required: ['segments', 'caption'],
         },
         temperature: 0.7,
       },
@@ -338,17 +404,18 @@ Return ONLY valid JSON (no markdown fences) with this structure:
   console.log(`[story] Presenter text (${text.length} chars): ${text.slice(0, 300)}…`);
 
   // Try multiple strategies to extract valid JSON
-  let result: { narrationScript: string; caption?: string } | null = null;
+  type PresenterRaw = { segments?: string[]; narrationScript?: string; caption?: string };
+  let result: PresenterRaw | null = null;
 
   // Strategy 1: Direct parse
   try {
-    result = JSON.parse(text) as { narrationScript: string; caption?: string };
+    result = JSON.parse(text) as PresenterRaw;
   } catch {
     // Strategy 2: Extract JSON object via regex
-    const jsonMatch = text.match(/\{[\s\S]*"narrationScript"[\s\S]*\}/);
+    const jsonMatch = text.match(/\{[\s\S]*"(?:segments|narrationScript)"[\s\S]*\}/);
     if (jsonMatch) {
       try {
-        result = JSON.parse(jsonMatch[0]) as { narrationScript: string; caption?: string };
+        result = JSON.parse(jsonMatch[0]) as PresenterRaw;
         console.log('[story] Presenter: extracted JSON via regex from mixed content');
       } catch {
         // Strategy 3: Try each non-thought part individually
@@ -359,7 +426,7 @@ Return ONLY valid JSON (no markdown fences) with this structure:
               partText = partText.replace(/```json/g, '').replace(/```/g, '').trim();
             }
             try {
-              result = JSON.parse(partText) as { narrationScript: string; caption?: string };
+              result = JSON.parse(partText) as PresenterRaw;
               console.log('[story] Presenter: parsed JSON from individual part');
               break;
             } catch {
@@ -376,14 +443,30 @@ Return ONLY valid JSON (no markdown fences) with this structure:
     throw new Error('Presenter script generation returned invalid JSON');
   }
 
-  if (!result.narrationScript) {
+  let segments = (result.segments ?? [])
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .map((s) => s.trim());
+
+  // Fallback for a model that ignored the schema and returned one script blob
+  if (segments.length === 0 && result.narrationScript) {
+    segments = [result.narrationScript.trim()];
+  }
+  if (segments.length === 0) {
     throw new Error('Presenter script generation returned an incomplete script');
   }
 
+  // If the model over-delivered, fold extras into the final part so no text is lost
+  if (segments.length > segmentCount) {
+    const extras = segments.splice(segmentCount - 1).join(' ');
+    segments.push(extras);
+  }
+
+  const narrationScript = segments.join(' ');
   console.log(
-    `[story] Presenter script generated: ${result.narrationScript.slice(0, 100)}…`,
+    `[story] Presenter script generated (${segments.length}/${segmentCount} parts, ` +
+      `${segments.map((s) => s.split(/\s+/).length).join('/')} words): ${narrationScript.slice(0, 100)}…`,
   );
-  return result;
+  return { narrationScript, segments, caption: result.caption };
 }
 
 /** Deliberately safe fallback prompt for scenes rejected by the safety filter. */
