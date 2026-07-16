@@ -32,10 +32,11 @@ function formatDate(iso: string): string {
 export default function ImagesPage() {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<ImageEntry | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedSet, setSelectedSet] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const lastClickedIndex = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchImages = useCallback(async () => {
@@ -75,24 +76,110 @@ export default function ImagesPage() {
     }
   }, [uploadFiles]);
 
-  const handleDelete = useCallback(
+  // Click handler with shift-select support
+  const handleCardClick = useCallback(
+    (index: number, e: React.MouseEvent) => {
+      const filename = images[index].filename;
+
+      if (e.shiftKey && lastClickedIndex.current !== null) {
+        // Shift+click: select range from last clicked to current
+        const start = Math.min(lastClickedIndex.current, index);
+        const end = Math.max(lastClickedIndex.current, index);
+        setSelectedSet((prev) => {
+          const next = new Set(prev);
+          for (let i = start; i <= end; i++) {
+            next.add(images[i].filename);
+          }
+          return next;
+        });
+      } else if (e.metaKey || e.ctrlKey) {
+        // Cmd/Ctrl+click: toggle individual item
+        setSelectedSet((prev) => {
+          const next = new Set(prev);
+          if (next.has(filename)) {
+            next.delete(filename);
+          } else {
+            next.add(filename);
+          }
+          return next;
+        });
+      } else {
+        // Plain click: select only this item (or deselect if already sole selection)
+        setSelectedSet((prev) => {
+          if (prev.size === 1 && prev.has(filename)) {
+            return new Set();
+          }
+          return new Set([filename]);
+        });
+      }
+
+      lastClickedIndex.current = index;
+    },
+    [images],
+  );
+
+  const handleDeleteOne = useCallback(
     async (image: ImageEntry) => {
       if (!confirm(`Delete "${image.filename}"? This cannot be undone.`)) return;
-      setDeletingId(image.filename);
+      setDeletingIds((prev) => new Set(prev).add(image.filename));
       try {
         const res = await fetch(`/api/images/${image.filename}`, { method: "DELETE" });
         if (res.ok || res.status === 204) {
           setImages((prev) => prev.filter((i) => i.filename !== image.filename));
-          if (selected?.filename === image.filename) setSelected(null);
+          setSelectedSet((prev) => {
+            const next = new Set(prev);
+            next.delete(image.filename);
+            return next;
+          });
         }
       } catch {
         /* ignore */
       } finally {
-        setDeletingId(null);
+        setDeletingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(image.filename);
+          return next;
+        });
       }
     },
-    [selected],
+    [],
   );
+
+  const handleBulkDelete = useCallback(async () => {
+    const count = selectedSet.size;
+    if (count === 0) return;
+    if (!confirm(`Delete ${count} image${count > 1 ? "s" : ""}? This cannot be undone.`)) return;
+
+    const toDelete = [...selectedSet];
+    setDeletingIds(new Set(toDelete));
+
+    const deleted: string[] = [];
+    for (const filename of toDelete) {
+      try {
+        const res = await fetch(`/api/images/${filename}`, { method: "DELETE" });
+        if (res.ok || res.status === 204) deleted.push(filename);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    setImages((prev) => prev.filter((i) => !deleted.includes(i.filename)));
+    setSelectedSet(new Set());
+    setDeletingIds(new Set());
+  }, [selectedSet]);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedSet.size === images.length) {
+      setSelectedSet(new Set());
+    } else {
+      setSelectedSet(new Set(images.map((i) => i.filename)));
+    }
+  }, [images, selectedSet]);
+
+  // Derived state
+  const selectedImages = images.filter((i) => selectedSet.has(i.filename));
+  const singleSelected = selectedImages.length === 1 ? selectedImages[0] : null;
+  const isBulkDeleting = deletingIds.size > 0;
 
   return (
     <main className={styles.main}>
@@ -145,6 +232,36 @@ export default function ImagesPage() {
         )}
       </div>
 
+      {/* Bulk action bar */}
+      {selectedSet.size > 0 && (
+        <div className={styles.bulkBar}>
+          <span className={styles.bulkCount}>
+            {selectedSet.size} selected
+          </span>
+          <div className={styles.bulkActions}>
+            <button
+              className={styles.bulkSelectAll}
+              onClick={handleSelectAll}
+            >
+              {selectedSet.size === images.length ? "Deselect All" : "Select All"}
+            </button>
+            <button
+              className={styles.bulkDeselect}
+              onClick={() => setSelectedSet(new Set())}
+            >
+              Clear
+            </button>
+            <button
+              className={styles.bulkDeleteBtn}
+              onClick={handleBulkDelete}
+              disabled={isBulkDeleting}
+            >
+              {isBulkDeleting ? "Deleting…" : `🗑 Delete ${selectedSet.size}`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Loading skeleton */}
       {loading && images.length === 0 && (
         <div className={styles.loadingGrid}>
@@ -166,13 +283,11 @@ export default function ImagesPage() {
       {/* Image grid */}
       {images.length > 0 && (
         <div className={styles.grid}>
-          {images.map((image) => (
+          {images.map((image, index) => (
             <div
               key={image.filename}
-              className={`${styles.card} ${selected?.filename === image.filename ? styles.cardSelected : ""}`}
-              onClick={() =>
-                setSelected(selected?.filename === image.filename ? null : image)
-              }
+              className={`${styles.card} ${selectedSet.has(image.filename) ? styles.cardSelected : ""}`}
+              onClick={(e) => handleCardClick(index, e)}
             >
               <div className={styles.cardPreview}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -188,13 +303,19 @@ export default function ImagesPage() {
                     title="Delete image"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(image);
+                      handleDeleteOne(image);
                     }}
-                    disabled={deletingId === image.filename}
+                    disabled={deletingIds.has(image.filename)}
                   >
-                    {deletingId === image.filename ? "…" : "🗑"}
+                    {deletingIds.has(image.filename) ? "…" : "🗑"}
                   </button>
                 </div>
+                {/* Selection checkbox indicator */}
+                {selectedSet.size > 0 && (
+                  <span className={`${styles.selectIndicator} ${selectedSet.has(image.filename) ? styles.selectIndicatorActive : ""}`}>
+                    {selectedSet.has(image.filename) ? "✓" : ""}
+                  </span>
+                )}
                 {image.usedBy.length > 0 && (
                   <span className={styles.usageBadge}>
                     {image.usedBy.length} clip{image.usedBy.length > 1 ? "s" : ""}
@@ -216,14 +337,14 @@ export default function ImagesPage() {
         </div>
       )}
 
-      {/* Detail panel */}
-      {selected && (
+      {/* Detail panel — single selection only */}
+      {singleSelected && (
         <div className={styles.detail}>
           <div className={styles.detailClose}>
-            <h3 className={styles.detailTitle}>{selected.filename}</h3>
+            <h3 className={styles.detailTitle}>{singleSelected.filename}</h3>
             <button
               className={styles.closeBtn}
-              onClick={() => setSelected(null)}
+              onClick={() => setSelectedSet(new Set())}
             >
               ✕
             </button>
@@ -231,42 +352,42 @@ export default function ImagesPage() {
 
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={selected.url}
-            alt={selected.filename}
+            src={singleSelected.url}
+            alt={singleSelected.filename}
             className={styles.detailImage}
           />
 
           <div className={styles.detailActions}>
             <a
-              href={selected.url}
-              download={selected.filename}
+              href={singleSelected.url}
+              download={singleSelected.filename}
               className={styles.downloadBtn}
             >
               ⬇ Download
             </a>
             <button
               className={styles.deleteBtn}
-              onClick={() => handleDelete(selected)}
-              disabled={deletingId === selected.filename}
+              onClick={() => handleDeleteOne(singleSelected)}
+              disabled={deletingIds.has(singleSelected.filename)}
             >
-              {deletingId === selected.filename ? "Deleting…" : "🗑 Delete"}
+              {deletingIds.has(singleSelected.filename) ? "Deleting…" : "🗑 Delete"}
             </button>
           </div>
 
           <div className={styles.detailMeta}>
             <div className={styles.detailMetaRow}>
               <span>Size</span>
-              <span>{formatBytes(selected.sizeBytes)}</span>
+              <span>{formatBytes(singleSelected.sizeBytes)}</span>
             </div>
             <div className={styles.detailMetaRow}>
               <span>Uploaded</span>
-              <span>{formatDate(selected.createdAt)}</span>
+              <span>{formatDate(singleSelected.createdAt)}</span>
             </div>
-            {selected.usedBy.length > 0 && (
+            {singleSelected.usedBy.length > 0 && (
               <div className={styles.detailMetaRow}>
                 <span>Used by</span>
                 <div className={styles.usageList}>
-                  {selected.usedBy.map((title, i) => (
+                  {singleSelected.usedBy.map((title, i) => (
                     <span key={i} className={styles.usageTag}>
                       {title}
                     </span>
