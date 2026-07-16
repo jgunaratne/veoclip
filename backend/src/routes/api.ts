@@ -381,6 +381,147 @@ apiRouter.get('/videos', async (_req: Request, res: Response) => {
   res.json(results);
 });
 
+// List unique face photos used in previous presenter clips.
+// Returns an array of { url, clipTitle, createdAt } objects, newest first.
+apiRouter.get('/presenter-photos', async (_req: Request, res: Response) => {
+  try {
+    const clips = getAllClips().filter(
+      (c) => c.mode === 'presenter' && c.referenceImagePaths.length > 0,
+    );
+
+    // Deduplicate by basename — the same photo uploaded twice gets the same name
+    const seen = new Set<string>();
+    const photos: { url: string; path: string; clipTitle: string; createdAt: string }[] = [];
+
+    // Newest clips first so we keep the most recent occurrence
+    clips.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    for (const clip of clips) {
+      for (const imgPath of clip.referenceImagePaths) {
+        const basename = path.basename(imgPath);
+        if (seen.has(basename)) continue;
+        seen.add(basename);
+        // Verify the file still exists on disk
+        try {
+          await fs.access(imgPath);
+          photos.push({
+            url: `/uploads/${basename}`,
+            path: imgPath,
+            clipTitle: clip.title || 'Untitled',
+            createdAt: clip.createdAt,
+          });
+        } catch {
+          // File was deleted — skip
+        }
+      }
+    }
+
+    res.json(photos);
+  } catch (err) {
+    console.error('[api] Presenter photos failed:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// List all uploaded image files with metadata and clip usage.
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.bmp']);
+
+apiRouter.get('/images', async (_req: Request, res: Response) => {
+  try {
+    const dirPath = path.resolve(uploadDir);
+    const entries = await fs.readdir(dirPath);
+    const allClips = getAllClips();
+
+    // Build a map of image path → clip titles that reference it
+    const usageMap = new Map<string, string[]>();
+    for (const clip of allClips) {
+      for (const imgPath of clip.referenceImagePaths) {
+        const basename = path.basename(imgPath);
+        const existing = usageMap.get(basename) || [];
+        existing.push(clip.title || 'Untitled');
+        usageMap.set(basename, existing);
+      }
+    }
+
+    const images = await Promise.all(
+      entries
+        .filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()))
+        .map(async (name) => {
+          const filePath = path.join(dirPath, name);
+          const stat = await fs.stat(filePath);
+          return {
+            filename: name,
+            url: `/uploads/${name}`,
+            sizeBytes: stat.size,
+            createdAt: stat.birthtime.toISOString(),
+            usedBy: usageMap.get(name) || [],
+          };
+        }),
+    );
+
+    // Newest first
+    images.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json(images);
+  } catch (err) {
+    console.error('[api] Image listing failed:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Upload new image assets (reuses the existing multer config)
+apiRouter.post(
+  '/images',
+  upload.array('images', MAX_IMAGES),
+  async (req: Request, res: Response) => {
+    try {
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      if (files.length === 0) {
+        res.status(400).json({ error: 'No image files provided' });
+        return;
+      }
+
+      const imagePaths = await Promise.all(files.map((f) => ensureJpeg(f.path)));
+      const results = await Promise.all(
+        imagePaths.map(async (p) => {
+          const stat = await fs.stat(p);
+          const name = path.basename(p);
+          return {
+            filename: name,
+            url: `/uploads/${name}`,
+            sizeBytes: stat.size,
+            createdAt: stat.birthtime.toISOString(),
+            usedBy: [] as string[],
+          };
+        }),
+      );
+
+      res.status(201).json(results);
+    } catch (err) {
+      console.error('[api] Image upload failed:', err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  },
+);
+
+// Delete an uploaded image file
+apiRouter.delete('/images/:filename', async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  // Security: prevent path traversal
+  if (filename.includes('/') || filename.includes('\\') || filename === '..') {
+    res.status(400).json({ error: 'Invalid filename' });
+    return;
+  }
+
+  const filePath = path.join(path.resolve(uploadDir), filename);
+  try {
+    await fs.access(filePath);
+    await fs.unlink(filePath);
+    res.status(204).send();
+  } catch {
+    res.status(404).json({ error: 'File not found' });
+  }
+});
+
 // Composite: superimpose a green-screen presenter video onto a background
 // video. The background comes either from an uploaded file ('background')
 // or an existing clip (backgroundClipId). Returns a clip in mode 'composite'
@@ -390,7 +531,12 @@ apiRouter.post(
   videoUpload.single('background'),
   async (req: Request, res: Response) => {
     try {
-      const { presenterClipId, backgroundClipId } = req.body;
+      const { presenterClipId, backgroundClipId, presenterScale: scaleRaw } = req.body;
+
+      // Clamp presenter scale to a sensible range (10%–100% of frame height)
+      const presenterScale = scaleRaw
+        ? Math.max(0.1, Math.min(1.0, parseFloat(scaleRaw)))
+        : undefined;
 
       const presenter = getClip(presenterClipId);
       const presenterPath = presenter?.finalPath || presenter?.videoPath;
@@ -432,6 +578,7 @@ apiRouter.post(
             backgroundPath: backgroundPath!,
             outputDir,
             clipId: clip.id,
+            presenterScale,
           });
           updateClip(clip.id, { finalPath, status: 'complete' });
           console.log(`[composite] Clip ${clip.id} complete!`);
@@ -499,7 +646,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, voiceAge, voicePitch, voiceTexture, voiceAccent } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, voiceAge, voicePitch, voiceTexture, voiceAccent, existingImagePath } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -513,9 +660,23 @@ apiRouter.post(
       }
 
       // Convert any non-JPEG/PNG uploads (AVIF, WEBP, HEIC, etc.) to JPEG
-      const imagePaths = await Promise.all(
+      let imagePaths = await Promise.all(
         files.map((f) => ensureJpeg(f.path)),
       );
+
+      // Allow reusing a previously uploaded image when no new files are provided
+      if (imagePaths.length === 0 && existingImagePath && typeof existingImagePath === 'string') {
+        const resolved = path.resolve(existingImagePath);
+        // Security: only allow paths within the uploads directory
+        if (resolved.startsWith(path.resolve(uploadDir))) {
+          try {
+            await fs.access(resolved);
+            imagePaths = [resolved];
+          } catch {
+            // File doesn't exist — ignore silently
+          }
+        }
+      }
 
       const clip: Clip = {
         id: uuidv4(),

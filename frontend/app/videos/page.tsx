@@ -39,6 +39,7 @@ export default function VideosPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<VideoEntry | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchVideos = useCallback(async () => {
     setLoading(true);
@@ -65,6 +66,21 @@ export default function VideosPage() {
     setCopiedId(video.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
+  const handleDelete = useCallback(async (video: VideoEntry) => {
+    if (!confirm(`Delete "${video.title}"? This cannot be undone.`)) return;
+    setDeletingId(video.id);
+    try {
+      const res = await fetch(`/api/clips/${video.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      setVideos((prev) => prev.filter((v) => v.id !== video.id));
+      if (selected?.id === video.id) setSelected(null);
+    } catch (err) {
+      alert(`Failed to delete: ${(err as Error).message}`);
+    } finally {
+      setDeletingId(null);
+    }
+  }, [selected]);
 
   return (
     <main className={styles.main}>
@@ -121,6 +137,17 @@ export default function VideosPage() {
                 />
                 <div className={styles.cardOverlay}>
                   <span className={styles.playIcon}>▶</span>
+                  <button
+                    className={styles.cardDeleteBtn}
+                    title="Delete video"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(video);
+                    }}
+                    disabled={deletingId === video.id}
+                  >
+                    {deletingId === video.id ? "…" : "🗑"}
+                  </button>
                 </div>
                 <span className={`${styles.modeBadge} ${video.mode === "presenter" ? styles.modeBadgePresenter : styles.modeBadgeStory}`}>
                   {video.mode === "presenter" ? "🎤 Presenter" : video.mode === "composite" ? "🎭 Composite" : "📝 Story"}
@@ -168,6 +195,13 @@ export default function VideosPage() {
                 {copiedId === selected.id ? "✓ Copied!" : "📋 Copy Caption"}
               </button>
             )}
+            <button
+              className={styles.deleteBtn}
+              onClick={() => handleDelete(selected)}
+              disabled={deletingId === selected.id}
+            >
+              {deletingId === selected.id ? "Deleting…" : "🗑 Delete"}
+            </button>
           </div>
 
           {selected.caption && (

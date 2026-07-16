@@ -59,9 +59,19 @@ async function getErrorMessage(res: Response): Promise<string> {
   }
 }
 
+interface PreviousPhoto {
+  url: string;
+  path: string;
+  clipTitle: string;
+  createdAt: string;
+}
+
 export default function PresenterModePage() {
   // Form state
   const [faceFile, setFaceFile] = useState<File | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<PreviousPhoto | null>(null);
+  const [previousPhotos, setPreviousPhotos] = useState<PreviousPhoto[]>([]);
+  const [deletingPhotoUrl, setDeletingPhotoUrl] = useState<string | null>(null);
   const [storyText, setStoryText] = useState("");
   const [length, setLength] = useState(30);
   const [personality, setPersonality] = useState<PresenterPersonality>("social");
@@ -77,6 +87,13 @@ export default function PresenterModePage() {
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
+    // Load previously used presenter photos
+    fetch("/api/presenter-photos")
+      .then(async (res) => {
+        if (res.ok) setPreviousPhotos(await res.json());
+      })
+      .catch(() => {});
+
     return () => {
       eventSourceRef.current?.close();
       if (pollingRef.current) clearInterval(pollingRef.current);
@@ -112,6 +129,8 @@ export default function PresenterModePage() {
       const formData = new FormData();
       if (faceFile) {
         formData.append("images", faceFile);
+      } else if (selectedPhoto) {
+        formData.append("existingImagePath", selectedPhoto.path);
       }
       formData.append("storyText", storyText);
       formData.append("speakerVoice", "Puck");
@@ -249,8 +268,12 @@ export default function PresenterModePage() {
 
   const showRightColumn = clip && clip.status !== "idle";
 
-  // Face image preview
-  const facePreviewUrl = faceFile ? URL.createObjectURL(faceFile) : null;
+  // Face image preview: new upload takes priority, then selected previous photo
+  const facePreviewUrl = faceFile
+    ? URL.createObjectURL(faceFile)
+    : selectedPhoto
+      ? selectedPhoto.url
+      : null;
 
   return (
     <>
@@ -268,13 +291,74 @@ export default function PresenterModePage() {
           <div className={styles.left}>
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>1. Presenter & Script</h2>
+              {previousPhotos.length > 0 && (
+                <div>
+                  <label className={styles.photoPickerLabel}>Previous Photos</label>
+                  <div className={styles.photoGrid}>
+                    {previousPhotos.map((photo) => {
+                      const filename = photo.url.split("/").pop()!;
+                      return (
+                      <div key={photo.url} className={styles.photoThumbWrap}>
+                        <button
+                          type="button"
+                          className={`${styles.photoThumb} ${
+                            selectedPhoto?.url === photo.url && !faceFile
+                              ? styles.photoThumbActive
+                              : ""
+                          }`}
+                          onClick={() => {
+                            if (selectedPhoto?.url === photo.url) {
+                              setSelectedPhoto(null);
+                            } else {
+                              setSelectedPhoto(photo);
+                              setFaceFile(null);
+                            }
+                          }}
+                          title={photo.clipTitle}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={photo.url}
+                            alt={photo.clipTitle}
+                            className={styles.photoThumbImg}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.photoDeleteBtn}
+                          title="Delete photo"
+                          disabled={deletingPhotoUrl === photo.url}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirm("Delete this photo?")) return;
+                            setDeletingPhotoUrl(photo.url);
+                            try {
+                              const res = await fetch(`/api/images/${filename}`, { method: "DELETE" });
+                              if (res.ok || res.status === 204) {
+                                setPreviousPhotos((prev) => prev.filter((p) => p.url !== photo.url));
+                                if (selectedPhoto?.url === photo.url) setSelectedPhoto(null);
+                              }
+                            } catch { /* ignore */ }
+                            setDeletingPhotoUrl(null);
+                          }}
+                        >
+                          {deletingPhotoUrl === photo.url ? "…" : "✕"}
+                        </button>
+                      </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <FileInput
-                label="Face Photo"
+                label={previousPhotos.length > 0 ? "…or upload a new photo" : "Face Photo"}
                 value={faceFile ? [faceFile] : []}
                 onChange={(val) => {
                   if (!val) setFaceFile(null);
                   else if (Array.isArray(val)) setFaceFile(val[0] ?? null);
                   else setFaceFile(val);
+                  if (val) setSelectedPhoto(null);
                 }}
                 accept="image/*"
                 mode="dropzone"
@@ -296,7 +380,10 @@ export default function PresenterModePage() {
                     }}
                   />
                   <button
-                    onClick={() => setFaceFile(null)}
+                    onClick={() => {
+                      setFaceFile(null);
+                      setSelectedPhoto(null);
+                    }}
                     style={{
                       position: "absolute",
                       top: 8,
