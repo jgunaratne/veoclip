@@ -39,6 +39,7 @@ interface Clip {
   videoPath?: string;
   enableNarration?: boolean;
   enableMusic?: boolean;
+  musicVolume?: number;
   musicPrompt?: string;
   // Inputs echoed back by the backend — used to restore the form on resume
   storyText?: string;
@@ -76,6 +77,7 @@ export default function CreatePage() {
   const [ensureContinuity, setEnsureContinuity] = useState(false);
   const [crossfade, setCrossfade] = useState(false);
   const [enableMusic, setEnableMusic] = useState(true);
+  const [musicVolume, setMusicVolume] = useState(12);
   const [musicPrompt, setMusicPrompt] = useState("");
   const [isMusicPromptSuggesting, setIsMusicPromptSuggesting] = useState(false);
 
@@ -150,6 +152,7 @@ export default function CreatePage() {
       if (recovered.length) setLength(recovered.length);
       if (recovered.enableNarration !== undefined) setEnableNarration(recovered.enableNarration);
       if (recovered.enableMusic !== undefined) setEnableMusic(recovered.enableMusic);
+      if (recovered.musicVolume !== undefined) setMusicVolume(recovered.musicVolume);
       if (recovered.musicPrompt) setMusicPrompt(recovered.musicPrompt);
       if (recovered.ensureContinuity !== undefined) setEnsureContinuity(recovered.ensureContinuity);
       if (recovered.crossfade !== undefined) setCrossfade(recovered.crossfade);
@@ -186,6 +189,7 @@ export default function CreatePage() {
       formData.append("ensureContinuity", String(ensureContinuity));
       formData.append("crossfade", String(crossfade));
       formData.append("enableMusic", String(enableMusic));
+      formData.append("musicVolume", String(musicVolume));
       formData.append("enableNarration", String(enableNarration));
       if (useCustomVoice && characterProfile.trim() && enableNarration) {
         formData.append("characterProfile", characterProfile.trim());
@@ -233,7 +237,7 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [files, storyText, voice, length, ensureContinuity, crossfade, enableMusic, enableNarration, useCustomVoice, characterProfile, remember, setClip]);
+  }, [files, storyText, voice, length, ensureContinuity, crossfade, enableMusic, musicVolume, enableNarration, useCustomVoice, characterProfile, remember, setClip]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!clip || clip.status !== "script_ready") return;
@@ -244,7 +248,7 @@ export default function CreatePage() {
       const genRes = await fetch(`/api/clips/${clip.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ narrationScript: editedNarration, musicPrompt, crossfade, ensureContinuity }),
+        body: JSON.stringify({ narrationScript: editedNarration, musicPrompt, musicVolume, crossfade, ensureContinuity }),
       });
 
       if (!genRes.ok) {
@@ -344,6 +348,7 @@ export default function CreatePage() {
     setEnsureContinuity(false);
     setCrossfade(false);
     setEnableMusic(true);
+    setMusicVolume(12);
     setMusicPrompt("");
     setEditedNarration("");
   }, [reset]);
@@ -480,6 +485,22 @@ export default function CreatePage() {
                   />
                 </div>
               )}
+
+              {enableMusic && (
+                <div className={styles.volumeRow}>
+                  <label className={styles.volumeLabel}>Music Volume</label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={musicVolume}
+                    onChange={(e) => setMusicVolume(Number(e.target.value))}
+                    className={styles.volumeSlider}
+                  />
+                  <span className={styles.volumeValue}>{musicVolume}%</span>
+                </div>
+              )}
             </div>
 
             <div className={styles.section}>
@@ -586,7 +607,16 @@ export default function CreatePage() {
                       variant="secondary"
                       label="📋 Copy Caption"
                       clickAction={() => {
-                        navigator.clipboard.writeText(clip.caption!);
+                        const text = clip.caption!;
+                        if (navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(text);
+                        } else {
+                          const ta = Object.assign(document.createElement("textarea"), { value: text });
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                        }
                       }}
                     />
                   </div>

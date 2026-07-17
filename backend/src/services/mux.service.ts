@@ -59,10 +59,13 @@ export async function muxVideoAudio(opts: {
   videoPath: string;
   audioPath?: string;
   backgroundMusicPath?: string;
+  musicVolume?: number; // 0–100, default 12
   outputDir: string;
   clipId: string;
 }): Promise<string> {
   const { videoPath, audioPath, backgroundMusicPath, outputDir, clipId } = opts;
+  // Convert 0–100 user-facing percentage to a 0.0–1.0 ffmpeg volume multiplier
+  const musicVol = Math.max(0, Math.min(1, (opts.musicVolume ?? 12) / 100));
   const outputPath = path.join(outputDir, `${clipId}_final.mp4`);
 
   // Handle case where voiceover narration is disabled
@@ -77,7 +80,7 @@ export async function muxVideoAudio(opts: {
         if (hasVideoAudio) {
           // Mix video's original audio with music
           cmd
-            .complexFilter('[0:a:0]volume=1.0[v_audio];[1:a:0]volume=0.12[music];[v_audio][music]amix=inputs=2:duration=first[aout]')
+            .complexFilter(`[0:a:0]volume=1.0[v_audio];[1:a:0]volume=${musicVol.toFixed(4)}[music];[v_audio][music]amix=inputs=2:duration=first[aout]`)
             .outputOptions([
               '-c:v copy',
               '-c:a aac',
@@ -141,8 +144,8 @@ export async function muxVideoAudio(opts: {
     // Complex filter: time-scale narration if needed, lower music volume,
     // then mix them together
     const complexFilter = audioDuration > videoDuration && videoDuration > 0
-      ? `[1:a]${atempoChain(audioDuration / videoDuration)}[narr];[2:a]volume=0.12[music];[narr][music]amix=inputs=2:duration=shortest:dropout_transition=2[aout]`
-      : `[1:a]anull[narr];[2:a]volume=0.12[music];[narr][music]amix=inputs=2:duration=shortest:dropout_transition=2[aout]`;
+      ? `[1:a]${atempoChain(audioDuration / videoDuration)}[narr];[2:a]volume=${musicVol.toFixed(4)}[music];[narr][music]amix=inputs=2:duration=shortest:dropout_transition=2[aout]`
+      : `[1:a]anull[narr];[2:a]volume=${musicVol.toFixed(4)}[music];[narr][music]amix=inputs=2:duration=shortest:dropout_transition=2[aout]`;
 
     return new Promise((resolve, reject) => {
       ffmpeg()

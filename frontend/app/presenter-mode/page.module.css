@@ -136,9 +136,20 @@
   animation: slideUp 0.5s ease forwards;
 }
 
+.resultActions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.resultActions > * {
+  flex: 1;
+}
+
 .downloadBtn {
-  display: block;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 12px 32px;
   text-decoration: none;
 }

@@ -207,8 +207,16 @@ async function generateVideoGemini(opts: GenerateOpts): Promise<string> {
   const { image, lastFrame, prompt, negativePrompt, duration, outputDir, clipId } = opts;
 
   const apiKey = process.env.GEMINI_API_KEY!;
-  const model = process.env.VEO_MODEL || 'veo-3.1-fast-generate-preview';
+  let model = process.env.VEO_MODEL || 'veo-3.1-fast-generate-preview';
   const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+
+  // The "fast" model variant doesn't support image-to-video. Auto-upgrade to
+  // the full model when a seed image or last-frame image is provided.
+  if ((image || lastFrame) && model.includes('-fast-')) {
+    const upgraded = model.replace('-fast-', '-');
+    console.log(`[veo] Image seed detected — upgrading model from ${model} to ${upgraded}`);
+    model = upgraded;
+  }
 
   // 1. Submit generation request — Gemini Veo uses instances/parameters,
   //    and the seed image rides along as inline bytes on the instance.
