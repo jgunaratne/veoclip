@@ -690,7 +690,7 @@ apiRouter.post(
     try {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
 
-      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, bookendImage, voiceAge, voicePitch, voiceTexture, voiceAccent, existingImagePath } = req.body;
+      const { storyText, speakerVoice, length, ensureContinuity, characterProfile, enableMusic, musicVolume, enableNarration, mode, presenterPersonality, presenterStyle, crossfade, bookendImage, voiceAge, voicePitch, voiceTexture, voiceAccent, existingImagePath } = req.body;
 
       if (!storyText || !storyText.trim()) {
         res.status(400).json({ error: 'storyText is required' });
@@ -733,6 +733,7 @@ apiRouter.post(
         characterProfile: characterProfile?.trim() || undefined,
         // Presenter mode must never have background music, regardless of what the client sends
         enableMusic: mode === 'presenter' ? false : enableMusic === 'true' || enableMusic === true,
+        musicVolume: musicVolume != null ? Math.max(0, Math.min(100, Number(musicVolume))) : undefined,
         enableNarration: enableNarration !== 'false' && enableNarration !== false,
         length: parsedLength,
         ensureContinuity: ensureContinuity === 'true' || ensureContinuity === true,
@@ -845,7 +846,7 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
     return;
   }
 
-  if (clip.status !== 'idle' && clip.status !== 'error' && clip.status !== 'script_ready') {
+  if (clip.status !== 'idle' && clip.status !== 'error' && clip.status !== 'script_ready' && clip.status !== 'complete') {
     res.status(409).json({ error: `Clip is already ${clip.status}` });
     return;
   }
@@ -853,12 +854,15 @@ apiRouter.post('/clips/:id/generate', (req: Request, res: Response) => {
   // If the user sent an edited narrationScript, musicPrompt, or crossfade
   // setting, store them before launching. The crossfade checkbox can be
   // toggled after the clip was created, so the generate-time value wins.
-  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, bookendImage: bookendOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride, voiceAccent: voiceAccentOverride } = req.body ?? {};
+  const { narrationScript: narrationOverride, musicPrompt: musicPromptOverride, musicVolume: musicVolumeOverride, crossfade: crossfadeOverride, ensureContinuity: continuityOverride, bookendImage: bookendOverride, voiceAge: voiceAgeOverride, voicePitch: voicePitchOverride, voiceTexture: voiceTextureOverride, voiceAccent: voiceAccentOverride } = req.body ?? {};
   if (narrationOverride && typeof narrationOverride === 'string') {
     updateClip(clip.id, { narrationScript: narrationOverride });
   }
   if (musicPromptOverride && typeof musicPromptOverride === 'string' && clip.mode !== 'presenter') {
     updateClip(clip.id, { musicPrompt: musicPromptOverride });
+  }
+  if (musicVolumeOverride != null && !isNaN(Number(musicVolumeOverride))) {
+    updateClip(clip.id, { musicVolume: Math.max(0, Math.min(100, Number(musicVolumeOverride))) });
   }
   if (typeof crossfadeOverride === 'boolean') {
     updateClip(clip.id, { crossfade: crossfadeOverride });
@@ -1096,7 +1100,20 @@ async function runPipeline(clipId: string): Promise<void> {
     // keeps the seed image's background — so presenter seeds must be
     // green-screened. Story mode uses the photos untouched: their settings,
     // backgrounds, and every original element carry into the video.
-    let seedImagePaths = clip.referenceImagePaths;
+
+    // Filter out any reference images that no longer exist on disk (e.g. if
+    // the uploads directory was cleaned between sessions or on regenerate).
+    let seedImagePaths: string[] = [];
+    for (const p of clip.referenceImagePaths) {
+      try {
+        await fs.access(p);
+        seedImagePaths.push(p);
+      } catch {
+        console.warn(`[pipeline] Reference image not found (skipping): ${p}`);
+      }
+    }
+    console.log(`[pipeline] Clip ${clipId} has ${clip.referenceImagePaths.length} reference path(s), ${seedImagePaths.length} exist on disk`);
+
     if (clip.mode === 'presenter' && seedImagePaths.length > 0) {
       console.log(`[pipeline] Green-screening ${seedImagePaths.length} reference image(s)`);
       seedImagePaths = await Promise.all(
@@ -1307,10 +1324,13 @@ async function runPipeline(clipId: string): Promise<void> {
 
     throwIfCancelled(clipId);
 
-    // Join segments if we have more than one — crossfade or hard cuts
+    // Join segments if we have more than one — crossfade or hard cuts.
+    // When bookend mode is active the Veo lastFrame interpolation produces
+    // end-frames that are *close* to the seed image but not pixel-identical,
+    // so a brief crossfade masks the residual mismatch at cut boundaries.
     let videoPath: string;
     if (segmentPaths.length > 1) {
-      videoPath = clip.crossfade
+      videoPath = (clip.crossfade || bookendPath)
         ? await crossfadeVideos({ videoPaths: segmentPaths, outputDir, clipId })
         : await concatenateVideos({ videoPaths: segmentPaths, outputDir, clipId });
     } else {
@@ -1402,6 +1422,7 @@ async function runPipeline(clipId: string): Promise<void> {
       videoPath,
       audioPath,
       backgroundMusicPath: backgroundMusicPath ?? undefined,
+      musicVolume: getClip(clipId)?.musicVolume,
       outputDir,
       clipId,
     });

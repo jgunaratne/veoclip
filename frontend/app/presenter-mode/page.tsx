@@ -302,6 +302,40 @@ export default function PresenterModePage() {
     setEditedNarration("");
   }, [reset]);
 
+  // Re-generate the video from the same script. This creates a brand-new
+  // generation run so the user can try again if the first result wasn't good.
+  const handleRegenerateVideo = useCallback(async () => {
+    if (!clip?.id) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`/api/clips/${clip.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          narrationScript: editedNarration || clip.narrationScript,
+          crossfade,
+          ensureContinuity,
+          bookendImage,
+          voiceAge: voiceOptions.age,
+          voicePitch: voiceOptions.pitch,
+          voiceTexture: voiceOptions.texture,
+          voiceAccent: voiceOptions.accent,
+        }),
+      });
+      if (!res.ok) throw new Error(await getErrorMessage(res));
+      setClip((prev) =>
+        prev ? { ...prev, status: "generating_video", error: undefined, finalPath: undefined, videoPath: undefined } : prev,
+      );
+      watch(clip.id);
+    } catch (err) {
+      setClip((prev) =>
+        prev ? { ...prev, status: "error", error: (err as Error).message } : prev,
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [clip, editedNarration, crossfade, ensureContinuity, bookendImage, voiceOptions, watch, setClip]);
+
   // Stop a running generation — the backend pipeline aborts at its next
   // checkpoint and the clip is marked as stopped.
   const handleStop = useCallback(async () => {
@@ -441,10 +475,14 @@ export default function PresenterModePage() {
                 label={previousPhotos.length > 0 ? "…or upload a new photo" : "Face Photo"}
                 value={faceFile ? [faceFile] : []}
                 onChange={(val) => {
-                  if (!val) setFaceFile(null);
-                  else if (Array.isArray(val)) setFaceFile(val[0] ?? null);
-                  else setFaceFile(val);
-                  if (val) setSelectedPhoto(null);
+                  const file = !val
+                    ? null
+                    : Array.isArray(val)
+                      ? val[0] ?? null
+                      : val;
+                  setFaceFile(file);
+                  // Only clear selectedPhoto when a real file was picked
+                  if (file) setSelectedPhoto(null);
                 }}
                 accept="image/*"
                 mode="dropzone"
@@ -628,13 +666,21 @@ export default function PresenterModePage() {
             {clip?.status === "complete" && finalVideoUrl ? (
               <div className={styles.resultSection}>
                 <VideoPlayer src={finalVideoUrl} />
-                <a
-                  href={finalVideoUrl}
-                  download={`veoclip_presenter_${clip.id}.mp4`}
-                  className={`btn-primary ${styles.downloadBtn}`}
-                >
-                  <span>⬇ Download Video</span>
-                </a>
+                <div className={styles.resultActions}>
+                  <a
+                    href={finalVideoUrl}
+                    download={`veoclip_presenter_${clip.id}.mp4`}
+                    className={`btn-primary ${styles.downloadBtn}`}
+                  >
+                    <span>⬇ Download Video</span>
+                  </a>
+                  <Button
+                    variant="secondary"
+                    label={isSubmitting ? "Submitting…" : "🔄 Regenerate Video"}
+                    isDisabled={isSubmitting}
+                    clickAction={handleRegenerateVideo}
+                  />
+                </div>
 
                 {clip.caption && (
                   <div className={styles.captionBox}>
@@ -646,7 +692,16 @@ export default function PresenterModePage() {
                       variant="secondary"
                       label="📋 Copy Caption"
                       clickAction={() => {
-                        navigator.clipboard.writeText(clip.caption!);
+                        const text = clip.caption!;
+                        if (navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(text);
+                        } else {
+                          const ta = Object.assign(document.createElement("textarea"), { value: text });
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                        }
                       }}
                     />
                   </div>

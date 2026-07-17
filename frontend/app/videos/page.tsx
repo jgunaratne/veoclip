@@ -62,7 +62,16 @@ export default function VideosPage() {
 
   const handleCopyCaption = (video: VideoEntry) => {
     if (!video.caption) return;
-    navigator.clipboard.writeText(video.caption);
+    const text = video.caption;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+    } else {
+      const ta = Object.assign(document.createElement("textarea"), { value: text });
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
     setCopiedId(video.id);
     setTimeout(() => setCopiedId(null), 2000);
   };

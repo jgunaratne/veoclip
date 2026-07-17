@@ -113,6 +113,69 @@
   border: 1px solid var(--color-border-default, rgba(255,255,255,0.08));
 }
 
+/* ── Music volume slider ─────────────────────────────────────────── */
+.volumeRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: var(--color-background-surface, rgba(255,255,255,0.04));
+  border: 1px solid var(--color-border-default, rgba(255,255,255,0.08));
+}
+
+.volumeLabel {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #aaa);
+  white-space: nowrap;
+}
+
+.volumeSlider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border-default, rgba(255,255,255,0.12));
+  outline: none;
+  cursor: pointer;
+}
+
+.volumeSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-border-accent, #7c3aed);
+  border: 2px solid var(--color-background-surface, #1a1a2e);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.volumeSlider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.25);
+}
+
+.volumeSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-border-accent, #7c3aed);
+  border: 2px solid var(--color-background-surface, #1a1a2e);
+  cursor: pointer;
+}
+
+.volumeValue {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #fff);
+  min-width: 3ch;
+  text-align: right;
+}
+
 /* Full-width status bar inside stage */
 .statusBar {
   animation: slideUp 0.4s ease forwards;
