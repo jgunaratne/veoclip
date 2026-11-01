@@ -16,3 +16,6 @@ backend/data/
 
 backend/data/
 backend/models/
+
+# Local agent settings
+.claude/settings.local.json
